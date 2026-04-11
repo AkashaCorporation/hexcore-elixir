@@ -1,0 +1,24 @@
+# Build artifacts
+target/
+engine/build/
+node_modules/
+dist/
+
+# NAPI-RS output
+*.node
+*.d.ts.map
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deps (downloaded at build time)
+engine/deps/unicorn/
+
+# Logs
+*.log
+*.log.err

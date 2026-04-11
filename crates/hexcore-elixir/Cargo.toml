@@ -1,0 +1,17 @@
+[package]
+name = "hexcore-elixir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAPI-RS bridge for the HexCore Elixir emulation engine — Node.js/VS Code integration"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { workspace = true }
+napi-derive = { workspace = true }
+elixir-core = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"

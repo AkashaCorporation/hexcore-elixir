@@ -1,0 +1,51 @@
+{
+    "name": "@hexcore/elixir",
+    "version": "0.1.0",
+    "description": "HexCore Elixir — Clean-room dynamic analysis, emulation, and instrumentation framework",
+    "main": "index.js",
+    "types": "index.d.ts",
+    "files": [
+        "index.js",
+        "index.d.ts",
+        "README.md"
+    ],
+    "napi": {
+        "binaryName": "hexcore-elixir",
+        "targets": [
+            "x86_64-pc-windows-msvc",
+            "x86_64-unknown-linux-gnu",
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin"
+        ]
+    },
+    "scripts": {
+        "artifacts": "napi artifacts",
+        "build": "napi build --platform --release --manifest-path crates/hexcore-elixir/Cargo.toml",
+        "build:debug": "napi build --platform --manifest-path crates/hexcore-elixir/Cargo.toml",
+        "prepublishOnly": "napi prepublish -t npm",
+        "version": "napi version",
+        "test": "echo \"Tests pending\""
+    },
+    "devDependencies": {
+        "@napi-rs/cli": "^3.5.1",
+        "typescript": "^5.9.3"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/AkashaCorporation/hexcore-elixir"
+    },
+    "license": "Apache-2.0",
+    "engines": {
+        "node": ">= 22"
+    },
+    "keywords": [
+        "hexcore",
+        "emulation",
+        "dynamic-analysis",
+        "instrumentation",
+        "reverse-engineering",
+        "binary-analysis",
+        "napi-rs",
+        "native"
+    ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "elixir-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types, traits, and FFI boundary for the HexCore Elixir emulation engine"
+
+[dependencies]
+thiserror = { workspace = true }
+bitflags = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+cc = "1"
+cmake = "0.1"
+
+[dev-dependencies]
+proptest = "1"

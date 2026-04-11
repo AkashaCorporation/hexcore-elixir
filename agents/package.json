@@ -1,0 +1,14 @@
+{
+    "name": "@hexcore/elixir-agents",
+    "version": "0.1.0",
+    "description": "TypeScript/JS agent runtime for HexCore Elixir instrumentation",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "tsc",
+        "lint": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    }
+}
