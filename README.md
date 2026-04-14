@@ -1,5 +1,7 @@
 # HexCore Elixir
 
+> **Codename: 🜇 Project Azoth** — in alchemy, Azoth is mercury, the animating spirit of transformation. The HexCore hidden-arts codename lineage: Project Perseus (SAB zero-copy IPC) → Project Azoth (dynamic analysis engine).
+
 **Elixir** is the advanced dynamic analysis, emulation, and instrumentation framework behind [HexCore](https://github.com/AkashaCorporation/HikariSystem-HexCore). It is built on top of [HexCore-Unicorn](https://github.com/AkashaCorporation/hexcore-unicorn) and provides a clean-room, Apache-2.0 licensed OS emulation layer.
 
 Elixir was designed from the ground up to replace GPLv3 frameworks like Qiling, offering full cross-platform OS emulation (loaders, syscalls, VFS) combined with powerful, scriptable dynamic instrumentation concepts pioneered by Frida.

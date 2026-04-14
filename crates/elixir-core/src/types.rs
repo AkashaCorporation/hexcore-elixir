@@ -83,7 +83,7 @@ pub enum HookType {
     Syscall,
 }
 
-/// Emulation stop reason
+/// Emulation stop reason (detailed, for backward compatibility)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StopReason {
     /// Reached end address
@@ -100,4 +100,14 @@ pub enum StopReason {
     AgentStop(String),
     /// Error during emulation
     Error(String),
+}
+
+/// Simple stop reason enum — matches C ElixirStopReason
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimpleStopReason {
+    None = 0,
+    Exit = 1,
+    InsnLimit = 2,
+    Error = 3,
+    User = 4,
 }

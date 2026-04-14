@@ -1,24 +1,59 @@
-# Build artifacts
+# Rust build artifacts
 target/
+
+# CMake build artifacts
 engine/build/
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Node / NAPI-RS
 node_modules/
 dist/
-
-# NAPI-RS output
 *.node
 *.d.ts.map
+
+# MSVC / MinGW compilation artifacts
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.pch
+*.idb
+
+# But DO keep the vendored hexcore-unicorn binaries (they're a dev-time dep)
+!deps/hexcore-unicorn/lib/*.lib
+!deps/hexcore-unicorn/bin/*.dll
 
 # IDE
 .vscode/
 .idea/
+.qoder/
+*.user
+*.suo
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Deps (downloaded at build time)
-engine/deps/unicorn/
-
-# Logs
+# Logs / temp
 *.log
 *.log.err
+*.tmp
+
+# Engine deps downloaded at build time (NOT the vendored one at deps/hexcore-unicorn/)
+engine/deps/unicorn/
+
+# Swarm/test fixtures — binaries NOT committed, see handoff/fixtures/README.md
+handoff/fixtures/binaries/
+handoff/fixtures/ground-truth-traces/
+
+# Cargo.lock is kept (binary crate + reproducible builds for NAPI-RS)
+!Cargo.lock
