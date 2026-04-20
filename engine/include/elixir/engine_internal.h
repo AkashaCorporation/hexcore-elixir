@@ -48,6 +48,13 @@ struct ElixirContext {
     std::unique_ptr<LinuxKernelStubs> linux_stubs;
     uint64_t image_base = 0;  // Actual image base from PE/ELF header
     ElixirStopReason stop_reason = ELIXIR_STOP_NONE;
+    uint64_t instruction_count = 0;  // Actual instructions executed
+    // Set to true when elixir_run's SEH barrier catches a fault inside
+    // uc_emu_start. After this, the engine is assumed unusable: any
+    // further uc_* call may re-fault inside the corrupted libuc state,
+    // so the public API short-circuits and returns ELIXIR_ERR_UC_FAULT
+    // until the caller disposes the Emulator.
+    bool tainted = false;
 };
 
 // Loader function declarations

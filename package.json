@@ -1,7 +1,7 @@
 {
     "name": "@hexcore/elixir",
-    "version": "0.1.0",
-    "description": "HexCore Elixir — Clean-room dynamic analysis, emulation, and instrumentation framework",
+    "version": "1.0.0",
+    "description": "HexCore Elixir — Project Azoth clean-room dynamic analysis, emulation, and instrumentation framework",
     "main": "index.js",
     "types": "index.d.ts",
     "files": [
@@ -20,7 +20,7 @@
     },
     "scripts": {
         "artifacts": "napi artifacts",
-        "build": "napi build --platform --release --manifest-path crates/hexcore-elixir/Cargo.toml",
+        "build": "napi build --platform --release --manifest-path crates/hexcore-elixir/Cargo.toml && node -e \"const fs=require('fs');const src='target/x86_64-pc-windows-msvc/release/hexcore_elixir.dll';const dst='hexcore-elixir.win32-x64-msvc.node';if(fs.existsSync(src)){fs.copyFileSync(src,dst);console.log('Copied',src,'to',dst)}\"",
         "build:debug": "napi build --platform --manifest-path crates/hexcore-elixir/Cargo.toml",
         "prepublishOnly": "napi prepublish -t npm",
         "version": "napi version",

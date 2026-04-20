@@ -6,6 +6,18 @@
 use crate::error::{ElixirError, ElixirResult};
 use crate::ffi;
 use crate::types::{Arch, MemProt, OsType, SimpleStopReason, StopReason};
+use serde::Deserialize;
+
+/// One Win32 API call captured by the engine's hook dispatcher.
+/// Shape matches the JSON emitted by elixir_api_log_to_json.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApiLogEntry {
+    pub name: String,
+    pub module: String,
+    pub pc_address: u64,
+    pub return_value: u64,
+    pub arguments: Vec<u64>,
+}
 
 /// Configuration for creating an Elixir emulation session
 #[derive(Debug, Clone)]
@@ -184,6 +196,30 @@ impl Emulator {
         unsafe { ffi::elixir_api_log_count(self.ctx) }
     }
 
+    /// Full detail of every API call captured since load.
+    /// The engine allocates the JSON blob and we deserialise it once here;
+    /// prefer this over api_log_count when downstream needs names/args/pc.
+    pub fn api_log_snapshot(&self) -> ElixirResult<Vec<ApiLogEntry>> {
+        let mut data_ptr: *mut u8 = std::ptr::null_mut();
+        let mut data_len: usize = 0;
+        let err = unsafe {
+            ffi::elixir_api_log_to_json(self.ctx, &mut data_ptr, &mut data_len)
+        };
+        error_code_to_result(err)?;
+        if data_ptr.is_null() || data_len == 0 {
+            return Ok(Vec::new());
+        }
+        // Parse first, then free — the free is unconditional even on parse
+        // error so the engine's heap doesn't leak when a caller ships a
+        // malformed payload (shouldn't happen in practice).
+        let parse_result: Result<Vec<ApiLogEntry>, _> = {
+            let slice = unsafe { std::slice::from_raw_parts(data_ptr, data_len) };
+            serde_json::from_slice(slice)
+        };
+        unsafe { ffi::elixir_snapshot_free(data_ptr) };
+        parse_result.map_err(|e| ElixirError::Ffi(format!("api_log JSON parse: {}", e)))
+    }
+
     // Interceptor
     pub fn interceptor_attach(&mut self, addr: u64) -> ElixirResult<()> {
         let err = unsafe { ffi::elixir_interceptor_attach(self.ctx, addr) };
@@ -227,6 +263,11 @@ impl Emulator {
         let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len).to_vec() };
         unsafe { ffi::elixir_snapshot_free(data_ptr) };  // Uses same free function (delete[])
         Ok(data)
+    }
+
+    /// Get the actual number of instructions executed in the last run
+    pub fn instruction_count(&self) -> u64 {
+        unsafe { ffi::elixir_get_instruction_count(self.ctx) }
     }
 }
 
@@ -278,5 +319,8 @@ fn error_code_to_error(code: ffi::ElixirErrorCode) -> ElixirError {
             reason: "Memory operation failed".to_string(),
         },
         ffi::ElixirErrorCode::Args => ElixirError::Ffi("Invalid arguments".to_string()),
+        ffi::ElixirErrorCode::UcFault => ElixirError::Unicorn(
+            "uc_emu_start faulted (SEH access violation inside libuc JIT); emulation aborted but process survived".to_string(),
+        ),
     }
 }

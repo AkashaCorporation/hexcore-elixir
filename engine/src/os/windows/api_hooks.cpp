@@ -169,16 +169,23 @@ void Win32HookTable::code_hook_callback(uc_engine* uc, uint64_t address, uint32_
     // Return from API call
     self->do_return(result);
 
-    // Log the call
+    // Log the call. Capture name, module (IAT DLL), pc, args, and retval so
+    // downstream can reconstruct the full legacy-debugger shape:
+    //   { functionName, library, pcAddress, arguments[], returnValue }
+    // Args is always stored at read_args(6)'s width — the engine has no
+    // per-API arity table, so we trust the caller to ignore high-index
+    // noise when the true arity is smaller.
     auto name_it = self->stub_to_name_.find(address);
     std::string name = (name_it != self->stub_to_name_.end()) ? name_it->second : "unknown";
-    self->api_log_.push_back({name, result});
-    
-    // Debug: print API call with args (disabled for performance)
-    // std::printf("[API] %s -> 0x%llx\n", 
-    //             name.c_str(),
-    //             (unsigned long long)result);
-    (void)args;  // suppress unused warning
+    auto mod_it = self->stub_to_module_.find(address);
+    std::string module = (mod_it != self->stub_to_module_.end()) ? mod_it->second : std::string();
+    self->api_log_.push_back(ApiLogEntry{
+        std::move(name),
+        std::move(module),
+        address,
+        args,
+        result,
+    });
 }
 
 void Win32HookTable::register_handler(const std::string& name, uint64_t stub_addr, ApiHandlerFn handler) {
@@ -1238,7 +1245,12 @@ void Win32HookTable::register_all_handlers() {
 void Win32HookTable::register_pe_imports(const std::vector<ImportEntry>& imports) {
     for (const auto& imp : imports) {
         if (imp.is_data_import) continue;
-        
+
+        // Record source DLL up front so the api_log can surface it even when
+        // the handler lookup below misses (the log still needs the module
+        // tag; only the dispatch result depends on a registered handler).
+        stub_to_module_[imp.stub_addr] = imp.dll_name;
+
         // Try DLL-qualified lookup first (normalized: lowercase + .dll suffix)
         std::string qualified = normalize_dll(imp.dll_name) + "!" + imp.func_name;
         auto it = named_handlers_.find(qualified);

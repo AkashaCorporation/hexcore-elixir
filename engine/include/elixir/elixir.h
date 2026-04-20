@@ -48,6 +48,10 @@ enum ElixirError : int32_t {
     ELIXIR_ERR_OS       = -3,
     ELIXIR_ERR_MEMORY   = -4,
     ELIXIR_ERR_ARGS     = -5,
+    // Windows Structured Exception (access violation etc.) caught inside
+    // uc_emu_start — libuc's JIT code faulted and our __try/__except
+    // handler recovered. The emulation is aborted but the process survives.
+    ELIXIR_ERR_UC_FAULT = -6,
 };
 
 // --- Stop Reason ---
@@ -93,10 +97,22 @@ void        elixir_snapshot_free(uint8_t* data);
 // --- API Hook Logging ---
 ELIXIR_EXPORT uint64_t elixir_api_log_count(ElixirContext* ctx);
 
+// Serialise the Win32 api_log as a JSON array. Each entry is an object:
+//   { "name": str, "module": str, "pc_address": u64,
+//     "arguments": [u64 ...], "return_value": u64 }
+// Caller must release *out_data via elixir_snapshot_free (same new[]/delete[]
+// scheme as elixir_snapshot_save). On error *out_data is left untouched.
+ELIXIR_EXPORT ElixirError elixir_api_log_to_json(ElixirContext* ctx,
+                                                  uint8_t** out_data,
+                                                  size_t* out_len);
+
 // --- Interceptor ---
 ELIXIR_EXPORT ElixirError elixir_interceptor_attach(ElixirContext* ctx, uint64_t addr);
 ELIXIR_EXPORT ElixirError elixir_interceptor_detach(ElixirContext* ctx, uint64_t addr);
 ELIXIR_EXPORT uint64_t elixir_interceptor_log_count(ElixirContext* ctx);
+
+// --- Instruction Count ---
+ELIXIR_EXPORT uint64_t elixir_get_instruction_count(ElixirContext* ctx);
 
 // --- Stalker ---
 ELIXIR_EXPORT ElixirError elixir_stalker_follow(ElixirContext* ctx);

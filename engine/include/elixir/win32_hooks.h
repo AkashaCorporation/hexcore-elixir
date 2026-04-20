@@ -21,6 +21,18 @@ struct ElixirContext;  // forward declare, defined in engine_internal.h
 
 using ApiHandlerFn = std::function<uint64_t(uc_engine*, MemoryManager*, const std::vector<uint64_t>&)>;
 
+// One record per hooked Win32 call. Populated by code_hook_callback in
+// api_hooks.cpp on every guest -> stub dispatch. Consumed by the FFI
+// surface via elixir_api_log_to_json, which serialises the vector into
+// a JSON payload that the Rust layer deserialises into ApiLogEntry.
+struct ApiLogEntry {
+    std::string name;            // import function name (e.g. "GetSystemTimeAsFileTime")
+    std::string module;          // source DLL as declared in IAT (empty for dynamic stubs)
+    uint64_t pc_address;         // stub address where the hook fired
+    std::vector<uint64_t> args;  // first N args captured via read_args
+    uint64_t return_value;       // what the handler returned (also what RAX holds)
+};
+
 class Win32HookTable {
     uc_engine* uc_;
     MemoryManager* mem_;
@@ -33,6 +45,10 @@ class Win32HookTable {
     
     // Handler name lookup (for logging)
     std::map<uint64_t, std::string> stub_to_name_;
+    // Source DLL per stub address (populated by register_pe_imports).
+    // Dynamic stubs synthesised by GetProcAddress are intentionally absent:
+    // they have no single IAT origin so the log's module stays empty for them.
+    std::map<uint64_t, std::string> stub_to_module_;
     
     // State
     uint64_t tick_counter_ = 0;
@@ -50,7 +66,7 @@ class Win32HookTable {
     uint64_t process_heap_handle_ = 0xAA0000;
     
     // API call log
-    std::vector<std::pair<std::string, uint64_t>> api_log_;
+    std::vector<ApiLogEntry> api_log_;
     
     static void code_hook_callback(uc_engine* uc, uint64_t address, uint32_t size, void* user_data);
     
@@ -74,5 +90,5 @@ public:
     void register_all_handlers();
     
     size_t api_log_count() const { return api_log_.size(); }
-    const std::vector<std::pair<std::string, uint64_t>>& api_log() const { return api_log_; }
+    const std::vector<ApiLogEntry>& api_log() const { return api_log_; }
 };

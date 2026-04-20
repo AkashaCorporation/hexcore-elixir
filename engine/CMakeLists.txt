@@ -34,6 +34,16 @@ target_include_directories(elixir_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# /EHa — allow catch(...) inside the FFI exception barrier to catch Windows
+# Structured Exception Handling faults (access violations etc.) in addition
+# to C++ language exceptions. Without this, MSVC's default /EHsc turns any
+# SEH fault from libuc's translation block cache into a silent process
+# abort across the Rust FFI boundary. Keep /EHa limited to this target so
+# it does not leak into consumer compilation units.
+if(MSVC)
+    target_compile_options(elixir_engine PRIVATE /EHa)
+endif()
+
 # --- HexCore-Unicorn (vendored dev dependency) ---
 #
 # See ../deps/hexcore-unicorn/VERSION.md for provenance.

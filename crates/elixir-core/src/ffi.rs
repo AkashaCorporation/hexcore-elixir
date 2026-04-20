@@ -41,6 +41,8 @@ pub enum ElixirErrorCode {
     Os = -3,
     Memory = -4,
     Args = -5,
+    // SEH caught inside uc_emu_start — libuc's JIT faulted, we survived.
+    UcFault = -6,
 }
 
 extern "C" {
@@ -113,6 +115,15 @@ extern "C" {
 
     pub fn elixir_api_log_count(ctx: *mut ElixirContext) -> u64;
 
+    // Serialises the Win32 api_log to a JSON array (UTF-8).
+    // *out_data is owned by the engine and must be released via
+    // elixir_snapshot_free (same new[]/delete[] pair as snapshots).
+    pub fn elixir_api_log_to_json(
+        ctx: *mut ElixirContext,
+        out_data: *mut *mut u8,
+        out_len: *mut usize,
+    ) -> ElixirErrorCode;
+
     // Interceptor
     pub fn elixir_interceptor_attach(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
     pub fn elixir_interceptor_detach(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
@@ -127,4 +138,7 @@ extern "C" {
         out_data: *mut *mut u8,
         out_len: *mut usize,
     ) -> ElixirErrorCode;
+
+    // Instruction Count
+    pub fn elixir_get_instruction_count(ctx: *mut ElixirContext) -> u64;
 }
