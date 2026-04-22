@@ -833,6 +833,63 @@ uint64_t elixir_interceptor_log_count(ElixirContext* ctx) try {
 }
 ELIXIR_FFI_CATCH_RETURN(0)
 
+// --- Project Pythia Oracle Hook: Breakpoint C API ---
+// Persistent UC_HOOK_CODE that consults ctx->breakpoints on every instruction
+// boundary. When PC matches, set stop_reason and call uc_emu_stop so the
+// enclosing elixir_run returns cleanly. Guest state (RIP, GPRs, memory) is
+// preserved; subsequent elixir_run from PC resumes naturally.
+static void pythia_breakpoint_hook(uc_engine* uc, uint64_t addr, uint32_t /*size*/, void* user_data) {
+    auto* ctx = static_cast<ElixirContext*>(user_data);
+    if (!ctx) return;
+    // std::unordered_set::count is O(1) average; acceptable per-instruction overhead.
+    if (ctx->breakpoints.count(addr) > 0) {
+        ctx->stop_reason = ELIXIR_STOP_BREAKPOINT;
+        uc_emu_stop(uc);
+    }
+}
+
+ElixirError elixir_breakpoint_add(ElixirContext* ctx, uint64_t addr) try {
+    if (!ctx || !ctx->uc) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
+
+    // Install the persistent BP hook on first use. A single hook handles
+    // all breakpoints — checking the set is cheaper than hook bookkeeping.
+    if (ctx->breakpoint_hook == 0) {
+        uc_err err = uc_hook_add(ctx->uc, &ctx->breakpoint_hook, UC_HOOK_CODE,
+                                  reinterpret_cast<void*>(pythia_breakpoint_hook),
+                                  ctx, 1, 0);
+        if (err != UC_ERR_OK) {
+            ctx->breakpoint_hook = 0;
+            std::fprintf(stderr, "[elixir] breakpoint_add: uc_hook_add failed %d (%s)\n",
+                         (int)err, uc_strerror(err));
+            std::fflush(stderr);
+            return ELIXIR_ERR_UNICORN;
+        }
+    }
+
+    ctx->breakpoints.insert(addr);
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
+
+ElixirError elixir_breakpoint_del(ElixirContext* ctx, uint64_t addr) try {
+    if (!ctx) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
+    ctx->breakpoints.erase(addr);
+    // We deliberately keep the hook installed — bp_check_hook is a no-op
+    // when the set is empty, and this avoids racing hook add/del cycles.
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
+
+ElixirError elixir_breakpoint_clear(ElixirContext* ctx) try {
+    if (!ctx) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
+    ctx->breakpoints.clear();
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
+
 // --- Stalker C API ---
 ElixirError elixir_stalker_follow(ElixirContext* ctx) try {
     if (!ctx || !ctx->stalker) return ELIXIR_ERR_ARGS;

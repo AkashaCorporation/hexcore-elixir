@@ -25,6 +25,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 // Import entry for API hook registration
 struct ImportEntry {
@@ -55,6 +56,15 @@ struct ElixirContext {
     // so the public API short-circuits and returns ELIXIR_ERR_UC_FAULT
     // until the caller disposes the Emulator.
     bool tainted = false;
+
+    // --- Project Pythia Oracle Hook (v3.9.0-preview.oracle) ---
+    // Set of PCs at which emulation must stop. Checked on every code
+    // hook fire via bp_check_hook. Persistent across elixir_run calls.
+    std::unordered_set<uint64_t> breakpoints;
+    // Handle for the single persistent UC_HOOK_CODE that scans the
+    // set. Zero means not yet installed; installed lazily on the
+    // first elixir_breakpoint_add call.
+    uc_hook breakpoint_hook = 0;
 };
 
 // Loader function declarations

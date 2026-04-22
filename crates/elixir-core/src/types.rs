@@ -110,4 +110,6 @@ pub enum SimpleStopReason {
     InsnLimit = 2,
     Error = 3,
     User = 4,
+    /// Project Pythia Oracle Hook breakpoint (v3.9.0-preview.oracle)
+    Breakpoint = 5,
 }

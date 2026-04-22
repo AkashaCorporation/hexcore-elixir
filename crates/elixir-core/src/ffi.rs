@@ -141,4 +141,9 @@ extern "C" {
 
     // Instruction Count
     pub fn elixir_get_instruction_count(ctx: *mut ElixirContext) -> u64;
+
+    // Breakpoints (Project Pythia Oracle Hook, v3.9.0-preview.oracle)
+    pub fn elixir_breakpoint_add(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
+    pub fn elixir_breakpoint_del(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
+    pub fn elixir_breakpoint_clear(ctx: *mut ElixirContext) -> ElixirErrorCode;
 }

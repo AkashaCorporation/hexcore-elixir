@@ -61,7 +61,7 @@ pub struct JsEmulatorConfig {
 /// Result of a run() operation.
 #[napi(object)]
 pub struct JsStopReason {
-    /// Stop reason kind: "exit", "insn_limit", "error", "user", "none"
+    /// Stop reason kind: "exit", "insn_limit", "error", "user", "breakpoint", "none"
     pub kind: String,
     /// Current instruction pointer address
     pub address: BigInt,
@@ -229,6 +229,10 @@ impl Emulator {
                 }
                 elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
                 elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+                elixir_core::types::SimpleStopReason::Breakpoint => (
+                    "breakpoint",
+                    "Project Pythia Oracle breakpoint hit".to_string(),
+                ),
                 elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
             };
 
@@ -387,6 +391,46 @@ impl Emulator {
         self.check_disposed()?;
         let inner = self.inner.as_ref().unwrap();
         Ok(inner.interceptor_log_count() as i64)
+    }
+
+    // === Project Pythia Oracle Hook — Breakpoint API (v3.9.0-preview.oracle) ===
+    // Installs / removes a stop-on-PC breakpoint. emulator.run() returns cleanly
+    // when PC matches and stopReason becomes "breakpoint" (value 5). State is
+    // preserved; call run(currentPc, 0, cap) to resume.
+
+    /// Add a breakpoint at the given PC. emulator.run() will stop when PC reaches it.
+    #[napi]
+    pub fn breakpoint_add(&mut self, address: BigInt) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        let addr = address.get_u64().1;
+        inner
+            .breakpoint_add(addr)
+            .map_err(|e| Error::from_reason(format!("Breakpoint add failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Remove a breakpoint at the given PC.
+    #[napi]
+    pub fn breakpoint_del(&mut self, address: BigInt) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        let addr = address.get_u64().1;
+        inner
+            .breakpoint_del(addr)
+            .map_err(|e| Error::from_reason(format!("Breakpoint del failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Remove all breakpoints in bulk.
+    #[napi]
+    pub fn breakpoint_clear(&mut self) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        inner
+            .breakpoint_clear()
+            .map_err(|e| Error::from_reason(format!("Breakpoint clear failed: {}", e)))?;
+        Ok(())
     }
 
     /// Enable Stalker tracing.

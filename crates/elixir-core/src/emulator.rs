@@ -149,6 +149,8 @@ impl Emulator {
             2 => SimpleStopReason::InsnLimit,
             3 => SimpleStopReason::Error,
             4 => SimpleStopReason::User,
+            // 5 = ELIXIR_STOP_BREAKPOINT (Project Pythia Oracle Hook)
+            5 => SimpleStopReason::Breakpoint,
             _ => SimpleStopReason::None,
         }
     }
@@ -233,6 +235,24 @@ impl Emulator {
 
     pub fn interceptor_log_count(&self) -> u64 {
         unsafe { ffi::elixir_interceptor_log_count(self.ctx) }
+    }
+
+    // Breakpoints (Project Pythia Oracle Hook, v3.9.0-preview.oracle).
+    // elixir_run() stops cleanly when PC matches any registered address.
+    // The engine sets stop_reason to ELIXIR_STOP_BREAKPOINT (value 5).
+    pub fn breakpoint_add(&mut self, addr: u64) -> ElixirResult<()> {
+        let err = unsafe { ffi::elixir_breakpoint_add(self.ctx, addr) };
+        error_code_to_result(err)
+    }
+
+    pub fn breakpoint_del(&mut self, addr: u64) -> ElixirResult<()> {
+        let err = unsafe { ffi::elixir_breakpoint_del(self.ctx, addr) };
+        error_code_to_result(err)
+    }
+
+    pub fn breakpoint_clear(&mut self) -> ElixirResult<()> {
+        let err = unsafe { ffi::elixir_breakpoint_clear(self.ctx) };
+        error_code_to_result(err)
     }
 
     // Stalker

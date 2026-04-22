@@ -61,6 +61,7 @@ enum ElixirStopReason : int32_t {
     ELIXIR_STOP_INSN_LIMIT = 2,  // hit max_insns
     ELIXIR_STOP_ERROR      = 3,  // UC_ERR_*
     ELIXIR_STOP_USER       = 4,  // elixir_stop() called
+    ELIXIR_STOP_BREAKPOINT = 5,  // Project Pythia Oracle Hook breakpoint reached
 };
 
 // --- Lifecycle ---
@@ -113,6 +114,18 @@ ELIXIR_EXPORT uint64_t elixir_interceptor_log_count(ElixirContext* ctx);
 
 // --- Instruction Count ---
 ELIXIR_EXPORT uint64_t elixir_get_instruction_count(ElixirContext* ctx);
+
+// --- Breakpoints (Project Pythia Oracle Hook, v3.9.0-preview.oracle) ---
+// Adds or removes a PC at which elixir_run will stop. Internally backed by a
+// single persistent UC_HOOK_CODE that checks an unordered_set on every
+// instruction boundary. When PC matches an entry, uc_emu_stop() is called
+// and stop_reason is set to ELIXIR_STOP_BREAKPOINT. Breakpoints persist
+// across elixir_run invocations and across snapshot save/restore — remove
+// them with elixir_breakpoint_del before the session is over, or
+// elixir_breakpoint_clear for a bulk wipe.
+ELIXIR_EXPORT ElixirError elixir_breakpoint_add(ElixirContext* ctx, uint64_t addr);
+ELIXIR_EXPORT ElixirError elixir_breakpoint_del(ElixirContext* ctx, uint64_t addr);
+ELIXIR_EXPORT ElixirError elixir_breakpoint_clear(ElixirContext* ctx);
 
 // --- Stalker ---
 ELIXIR_EXPORT ElixirError elixir_stalker_follow(ElixirContext* ctx);
