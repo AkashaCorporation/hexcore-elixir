@@ -189,6 +189,64 @@ impl Emulator {
         })
     }
 
+    /// Project Pythia Oracle Hook — step N instructions (v3.9.0-preview.oracle).
+    /// Like `run()` but takes an explicit max-insns cap so the caller can
+    /// single-step past a just-removed breakpoint before re-adding it. The
+    /// cap overrides the Emulator's construction-time default for this
+    /// invocation only; subsequent run() calls use the original default.
+    #[napi]
+    pub fn run_n(&mut self, start: BigInt, end: BigInt, max_insns: BigInt) -> Result<JsStopReason> {
+        self.check_disposed()?;
+        let verbose = self.verbose;
+        let inner = self.inner.as_mut().unwrap();
+
+        let start_addr = start.get_u64().1;
+        let end_addr = end.get_u64().1;
+        let cap = max_insns.get_u64().1;
+
+        ffi_guard("Emulator::run_n", || {
+            if verbose {
+                eprintln!(
+                    "[Elixir] run_n from 0x{:x} to 0x{:x}, max_insns={}",
+                    start_addr, end_addr, cap
+                );
+            }
+
+            let run_result = inner.run(start_addr, end_addr, cap);
+            if let Err(ref e) = run_result {
+                if verbose {
+                    eprintln!("[Elixir] run_n() returned: {:?}", e);
+                }
+            }
+
+            let reason = inner.stop_reason();
+
+            let (kind, message) = match reason {
+                elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
+                elixir_core::types::SimpleStopReason::InsnLimit => {
+                    ("insn_limit", format!("Instruction limit reached ({})", cap))
+                }
+                elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
+                elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+                elixir_core::types::SimpleStopReason::Breakpoint => (
+                    "breakpoint",
+                    "Project Pythia Oracle breakpoint hit".to_string(),
+                ),
+                elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
+            };
+
+            let ip_value = inner.reg_read(41).unwrap_or(0);
+            let instructions_executed = inner.instruction_count();
+
+            Ok(JsStopReason {
+                kind: kind.to_string(),
+                address: BigInt::from(ip_value as i64),
+                instructions_executed: instructions_executed as i64,
+                message,
+            })
+        })
+    }
+
     /// Start emulation from the given address.
     /// end=0 means run until stop() or until max_instructions is reached.
     #[napi]

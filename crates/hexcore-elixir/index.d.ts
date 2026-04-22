@@ -23,6 +23,14 @@ export declare class Emulator {
    */
   load(data: Buffer): bigint
   /**
+   * Project Pythia Oracle Hook — step N instructions (v3.9.0-preview.oracle).
+   * Like `run()` but takes an explicit max-insns cap so the caller can
+   * single-step past a just-removed breakpoint before re-adding it. The
+   * cap overrides the Emulator's construction-time default for this
+   * invocation only; subsequent run() calls use the original default.
+   */
+  runN(start: bigint, end: bigint, maxInsns: bigint): JsStopReason
+  /**
    * Start emulation from the given address.
    * end=0 means run until stop() or until max_instructions is reached.
    */
@@ -52,6 +60,12 @@ export declare class Emulator {
   interceptorDetach(address: bigint): void
   /** Get interceptor log count. */
   interceptorLogCount(): number
+  /** Add a breakpoint at the given PC. emulator.run() will stop when PC reaches it. */
+  breakpointAdd(address: bigint): void
+  /** Remove a breakpoint at the given PC. */
+  breakpointDel(address: bigint): void
+  /** Remove all breakpoints in bulk. */
+  breakpointClear(): void
   /** Enable Stalker tracing. */
   stalkerFollow(): void
   /** Disable Stalker tracing. */
@@ -196,7 +210,7 @@ export interface JsStalkerEvent {
 
 /** Result of a run() operation. */
 export interface JsStopReason {
-  /** Stop reason kind: "exit", "insn_limit", "error", "user", "none" */
+  /** Stop reason kind: "exit", "insn_limit", "error", "user", "breakpoint", "none" */
   kind: string
   /** Current instruction pointer address */
   address: bigint
