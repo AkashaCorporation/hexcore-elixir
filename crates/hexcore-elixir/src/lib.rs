@@ -5,30 +5,6 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-// Run a closure that calls into the C++ engine and convert any panic into
-// a napi::Error. The C++ side already installs a `try { ... } catch (...)`
-// barrier on every extern "C" entry point so STL exceptions cannot cross
-// the FFI boundary; this handler catches the residual Rust panic path.
-// Any panic message is also written to stderr so VS Code's developer tools
-// can surface it (which is impossible when the extension host aborts).
-fn ffi_guard<T>(label: &'static str, f: impl FnOnce() -> Result<T>) -> Result<T> {
-    match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(result) => result,
-        Err(payload) => {
-            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
-                (*s).to_string()
-            } else if let Some(s) = payload.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic".to_string()
-            };
-            eprintln!("[elixir] panic in {}: {}", label, msg);
-            Err(Error::from_reason(format!("elixir {}: {}", label, msg)))
-        }
-    }
-}
 
 // ─── Version ────────────────────────────────────────────────────────────────
 
@@ -61,7 +37,7 @@ pub struct JsEmulatorConfig {
 /// Result of a run() operation.
 #[napi(object)]
 pub struct JsStopReason {
-    /// Stop reason kind: "exit", "insn_limit", "error", "user", "breakpoint", "none"
+    /// Stop reason kind: "exit", "insn_limit", "error", "user", "none"
     pub kind: String,
     /// Current instruction pointer address
     pub address: BigInt,
@@ -72,26 +48,14 @@ pub struct JsStopReason {
 }
 
 /// A single API call record.
-///
-/// Shape matches the `ApiCall` type consumed by the TS wrapper in
-/// extensions/hexcore-elixir/src/extension.ts — the IDE reads each field
-/// directly, so any rename here must be mirrored there (and vice versa).
 #[napi(object)]
 pub struct JsApiCall {
-    /// Function name (e.g. "GetSystemTimeAsFileTime").
+    /// API/function name
     pub name: String,
-    /// Source DLL declared in the PE import table (empty for dynamic stubs).
-    pub module: String,
-    /// Stub address where the hook fired (a.k.a. pc).
+    /// Call address
     pub address: BigInt,
-    /// Value the handler returned (also what RAX held on return).
+    /// Return value (0 if not available)
     pub return_value: BigInt,
-    /// First N argument registers captured at hook time.
-    /// N = 6 today (rcx, rdx, r8, r9, stack[0], stack[1]).
-    /// Entries past the real arity of the called function are noise — the
-    /// engine has no per-API signature table — consumers should trim based
-    /// on their own knowledge of the import.
-    pub arguments: Vec<BigInt>,
 }
 
 /// A single Stalker basic block event.
@@ -132,39 +96,37 @@ impl Emulator {
     /// Create a new Emulator instance.
     #[napi(constructor)]
     pub fn new(config: JsEmulatorConfig) -> Result<Self> {
-        ffi_guard("Emulator::new", || {
-            let arch = parse_arch(&config.arch)?;
-            let os = config
-                .os
-                .as_deref()
-                .map(parse_os)
-                .transpose()?
-                .unwrap_or(elixir_core::types::OsType::Windows); // Default to Windows for PE binaries
+        let arch = parse_arch(&config.arch)?;
+        let os = config
+            .os
+            .as_deref()
+            .map(parse_os)
+            .transpose()?
+            .unwrap_or(elixir_core::types::OsType::Windows); // Default to Windows for PE binaries
 
-            let core_config = elixir_core::emulator::EmulatorConfig {
-                arch,
-                os,
-                stack_size: config.stack_size.map(|s| s as u64).unwrap_or(2 * 1024 * 1024),
-                heap_size: config.heap_size.map(|h| h as u64).unwrap_or(16 * 1024 * 1024),
-                permissive_memory: config.permissive_memory.unwrap_or(true), // Default to true for better compatibility
-            };
+        let core_config = elixir_core::emulator::EmulatorConfig {
+            arch,
+            os,
+            stack_size: config.stack_size.map(|s| s as u64).unwrap_or(2 * 1024 * 1024),
+            heap_size: config.heap_size.map(|h| h as u64).unwrap_or(16 * 1024 * 1024),
+            permissive_memory: config.permissive_memory.unwrap_or(true), // Default to true for better compatibility
+        };
 
-            let mut emulator = elixir_core::emulator::Emulator::new(core_config)
-                .map_err(|e| Error::from_reason(format!("Failed to create Emulator: {}", e)))?;
+        let mut emulator = elixir_core::emulator::Emulator::new(core_config)
+            .map_err(|e| Error::from_reason(format!("Failed to create Emulator: {}", e)))?;
 
-            // Apply permissive memory option if requested (default is true)
-            if config.permissive_memory.unwrap_or(true) {
-                emulator
-                    .set_permissive_memory(true)
-                    .map_err(|e| Error::from_reason(format!("Failed to set permissive memory: {}", e)))?;
-            }
+        // Apply permissive memory option if requested (default is true)
+        if config.permissive_memory.unwrap_or(true) {
+            emulator
+                .set_permissive_memory(true)
+                .map_err(|e| Error::from_reason(format!("Failed to set permissive memory: {}", e)))?;
+        }
 
-            Ok(Self {
-                inner: Some(emulator),
-                disposed: false,
-                max_instructions: config.max_instructions.map(|m| m as u64).unwrap_or(1_000_000),
-                verbose: config.verbose.unwrap_or(false),
-            })
+        Ok(Self {
+            inner: Some(emulator),
+            disposed: false,
+            max_instructions: config.max_instructions.map(|m| m as u64).unwrap_or(1_000_000),
+            verbose: config.verbose.unwrap_or(false),
         })
     }
 
@@ -173,78 +135,16 @@ impl Emulator {
     #[napi]
     pub fn load(&mut self, data: Buffer) -> Result<BigInt> {
         self.check_disposed()?;
-        let verbose = self.verbose;
         let inner = self.inner.as_mut().unwrap();
-        let bytes = data.as_ref();
-        ffi_guard("Emulator::load", || {
-            let entry = inner
-                .load(bytes)
-                .map_err(|e| Error::from_reason(format!("Load failed: {}", e)))?;
+        let entry = inner
+            .load(data.as_ref())
+            .map_err(|e| Error::from_reason(format!("Load failed: {}", e)))?;
 
-            if verbose {
-                eprintln!("[Elixir] Loaded binary, entry point: 0x{:x}", entry);
-            }
+        if self.verbose {
+            eprintln!("[Elixir] Loaded binary, entry point: 0x{:x}", entry);
+        }
 
-            Ok(BigInt::from(entry as i64))
-        })
-    }
-
-    /// Project Pythia Oracle Hook — step N instructions (v3.9.0-preview.oracle).
-    /// Like `run()` but takes an explicit max-insns cap so the caller can
-    /// single-step past a just-removed breakpoint before re-adding it. The
-    /// cap overrides the Emulator's construction-time default for this
-    /// invocation only; subsequent run() calls use the original default.
-    #[napi]
-    pub fn run_n(&mut self, start: BigInt, end: BigInt, max_insns: BigInt) -> Result<JsStopReason> {
-        self.check_disposed()?;
-        let verbose = self.verbose;
-        let inner = self.inner.as_mut().unwrap();
-
-        let start_addr = start.get_u64().1;
-        let end_addr = end.get_u64().1;
-        let cap = max_insns.get_u64().1;
-
-        ffi_guard("Emulator::run_n", || {
-            if verbose {
-                eprintln!(
-                    "[Elixir] run_n from 0x{:x} to 0x{:x}, max_insns={}",
-                    start_addr, end_addr, cap
-                );
-            }
-
-            let run_result = inner.run(start_addr, end_addr, cap);
-            if let Err(ref e) = run_result {
-                if verbose {
-                    eprintln!("[Elixir] run_n() returned: {:?}", e);
-                }
-            }
-
-            let reason = inner.stop_reason();
-
-            let (kind, message) = match reason {
-                elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
-                elixir_core::types::SimpleStopReason::InsnLimit => {
-                    ("insn_limit", format!("Instruction limit reached ({})", cap))
-                }
-                elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
-                elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
-                elixir_core::types::SimpleStopReason::Breakpoint => (
-                    "breakpoint",
-                    "Project Pythia Oracle breakpoint hit".to_string(),
-                ),
-                elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
-            };
-
-            let ip_value = inner.reg_read(41).unwrap_or(0);
-            let instructions_executed = inner.instruction_count();
-
-            Ok(JsStopReason {
-                kind: kind.to_string(),
-                address: BigInt::from(ip_value as i64),
-                instructions_executed: instructions_executed as i64,
-                message,
-            })
-        })
+        Ok(BigInt::from(entry as i64))
     }
 
     /// Start emulation from the given address.
@@ -252,60 +152,52 @@ impl Emulator {
     #[napi]
     pub fn run(&mut self, start: BigInt, end: BigInt) -> Result<JsStopReason> {
         self.check_disposed()?;
-        let verbose = self.verbose;
-        let max_instructions = self.max_instructions;
         let inner = self.inner.as_mut().unwrap();
 
         let start_addr = start.get_u64().1;
         let end_addr = end.get_u64().1;
 
-        ffi_guard("Emulator::run", || {
-            if verbose {
-                eprintln!(
-                    "[Elixir] Running from 0x{:x} to 0x{:x}, max_insns={}",
-                    start_addr, end_addr, max_instructions
-                );
+        if self.verbose {
+            eprintln!(
+                "[Elixir] Running from 0x{:x} to 0x{:x}, max_insns={}",
+                start_addr, end_addr, self.max_instructions
+            );
+        }
+
+        // Run emulation - capture result but don't fail on non-fatal errors
+        // (G4 test shows UC_ERR_EXCEPTION can still result in clean exit via API hooks)
+        let run_result = inner.run(start_addr, end_addr, self.max_instructions);
+        if let Err(ref e) = run_result {
+            if self.verbose {
+                eprintln!("[Elixir] run() returned: {:?}", e);
             }
+        }
 
-            // Run emulation - capture result but don't fail on non-fatal errors
-            // (G4 test shows UC_ERR_EXCEPTION can still result in clean exit via API hooks)
-            let run_result = inner.run(start_addr, end_addr, max_instructions);
-            if let Err(ref e) = run_result {
-                if verbose {
-                    eprintln!("[Elixir] run() returned: {:?}", e);
-                }
+        // Get stop reason - this is the authoritative result
+        let reason = inner.stop_reason();
+        let _api_count = inner.api_log_count();
+
+        let (kind, message) = match reason {
+            elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
+            elixir_core::types::SimpleStopReason::InsnLimit => {
+                ("insn_limit", format!("Instruction limit reached ({})", self.max_instructions))
             }
+            elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
+            elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+            elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
+        };
 
-            // Get stop reason - this is the authoritative result
-            let reason = inner.stop_reason();
-            let _api_count = inner.api_log_count();
+        // Read actual RIP (x86_64 register ID 41 in Unicorn = UC_X86_REG_RIP)
+        let ip_value = inner.reg_read(41).unwrap_or(0);
 
-            let (kind, message) = match reason {
-                elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
-                elixir_core::types::SimpleStopReason::InsnLimit => {
-                    ("insn_limit", format!("Instruction limit reached ({})", max_instructions))
-                }
-                elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
-                elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
-                elixir_core::types::SimpleStopReason::Breakpoint => (
-                    "breakpoint",
-                    "Project Pythia Oracle breakpoint hit".to_string(),
-                ),
-                elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
-            };
+        // Get actual instruction count from engine
+        let instructions_executed = inner.instruction_count();
 
-            // Read actual RIP (x86_64 register ID 41 in Unicorn = UC_X86_REG_RIP)
-            let ip_value = inner.reg_read(41).unwrap_or(0);
-
-            // Get actual instruction count from engine
-            let instructions_executed = inner.instruction_count();
-
-            Ok(JsStopReason {
-                kind: kind.to_string(),
-                address: BigInt::from(ip_value as i64),
-                instructions_executed: instructions_executed as i64,
-                message,
-            })
+        Ok(JsStopReason {
+            kind: kind.to_string(),
+            address: BigInt::from(ip_value as i64),
+            instructions_executed: instructions_executed as i64,
+            message,
         })
     }
 
@@ -328,26 +220,21 @@ impl Emulator {
         Ok(inner.api_log_count() as i64)
     }
 
-    /// Get the detailed API call log — one entry per hooked Win32 call.
+    /// Get API call log (returns count for now as summary).
+    /// TODO: Return detailed per-call records when API is available.
     #[napi]
     pub fn get_api_calls(&mut self) -> Result<Vec<JsApiCall>> {
         self.check_disposed()?;
         let inner = self.inner.as_ref().unwrap();
-        ffi_guard("Emulator::get_api_calls", || {
-            let entries = inner
-                .api_log_snapshot()
-                .map_err(|e| Error::from_reason(format!("api_log_snapshot: {}", e)))?;
-            Ok(entries
-                .into_iter()
-                .map(|e| JsApiCall {
-                    name: e.name,
-                    module: e.module,
-                    address: BigInt::from(e.pc_address),
-                    return_value: BigInt::from(e.return_value),
-                    arguments: e.arguments.into_iter().map(BigInt::from).collect(),
-                })
-                .collect())
-        })
+        let count = inner.api_log_count();
+
+        // Return a single summary entry for now
+        // Future: iterate actual API call records
+        Ok(vec![JsApiCall {
+            name: format!("api_log_count_{}", count),
+            address: BigInt::from(0i64),
+            return_value: BigInt::from(count as i64),
+        }])
     }
 
     /// Read a register value.
@@ -449,46 +336,6 @@ impl Emulator {
         self.check_disposed()?;
         let inner = self.inner.as_ref().unwrap();
         Ok(inner.interceptor_log_count() as i64)
-    }
-
-    // === Project Pythia Oracle Hook — Breakpoint API (v3.9.0-preview.oracle) ===
-    // Installs / removes a stop-on-PC breakpoint. emulator.run() returns cleanly
-    // when PC matches and stopReason becomes "breakpoint" (value 5). State is
-    // preserved; call run(currentPc, 0, cap) to resume.
-
-    /// Add a breakpoint at the given PC. emulator.run() will stop when PC reaches it.
-    #[napi]
-    pub fn breakpoint_add(&mut self, address: BigInt) -> Result<()> {
-        self.check_disposed()?;
-        let inner = self.inner.as_mut().unwrap();
-        let addr = address.get_u64().1;
-        inner
-            .breakpoint_add(addr)
-            .map_err(|e| Error::from_reason(format!("Breakpoint add failed: {}", e)))?;
-        Ok(())
-    }
-
-    /// Remove a breakpoint at the given PC.
-    #[napi]
-    pub fn breakpoint_del(&mut self, address: BigInt) -> Result<()> {
-        self.check_disposed()?;
-        let inner = self.inner.as_mut().unwrap();
-        let addr = address.get_u64().1;
-        inner
-            .breakpoint_del(addr)
-            .map_err(|e| Error::from_reason(format!("Breakpoint del failed: {}", e)))?;
-        Ok(())
-    }
-
-    /// Remove all breakpoints in bulk.
-    #[napi]
-    pub fn breakpoint_clear(&mut self) -> Result<()> {
-        self.check_disposed()?;
-        let inner = self.inner.as_mut().unwrap();
-        inner
-            .breakpoint_clear()
-            .map_err(|e| Error::from_reason(format!("Breakpoint clear failed: {}", e)))?;
-        Ok(())
     }
 
     /// Enable Stalker tracing.

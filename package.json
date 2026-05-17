@@ -1,7 +1,7 @@
 {
     "name": "@hexcore/elixir",
-    "version": "1.0.0",
-    "description": "HexCore Elixir — Project Azoth clean-room dynamic analysis, emulation, and instrumentation framework",
+    "version": "1.0.1",
+    "description": "HexCore Elixir — Clean-room dynamic analysis, emulation, and instrumentation framework",
     "main": "index.js",
     "types": "index.d.ts",
     "files": [
