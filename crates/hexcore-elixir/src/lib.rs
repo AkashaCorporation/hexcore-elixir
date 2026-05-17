@@ -37,7 +37,7 @@ pub struct JsEmulatorConfig {
 /// Result of a run() operation.
 #[napi(object)]
 pub struct JsStopReason {
-    /// Stop reason kind: "exit", "insn_limit", "error", "user", "none"
+    /// Stop reason kind: "exit", "insn_limit", "error", "user", "breakpoint", "none"
     pub kind: String,
     /// Current instruction pointer address
     pub address: BigInt,
@@ -184,6 +184,9 @@ impl Emulator {
             }
             elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
             elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+            elixir_core::types::SimpleStopReason::Breakpoint => {
+                ("breakpoint", "Breakpoint hit".to_string())
+            }
             elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
         };
 
