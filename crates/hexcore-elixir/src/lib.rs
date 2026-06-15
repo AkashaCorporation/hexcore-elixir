@@ -48,14 +48,26 @@ pub struct JsStopReason {
 }
 
 /// A single API call record.
+///
+/// Shape matches the `ApiCall` type consumed by the TS wrapper in
+/// extensions/hexcore-elixir/src/extension.ts — the IDE reads each field
+/// directly, so any rename here must be mirrored there (and vice versa).
 #[napi(object)]
 pub struct JsApiCall {
-    /// API/function name
+    /// Function name (e.g. "GetSystemTimeAsFileTime").
     pub name: String,
-    /// Call address
+    /// Source DLL declared in the PE import table (empty for dynamic stubs).
+    pub module: String,
+    /// Stub address where the hook fired (a.k.a. pc).
     pub address: BigInt,
-    /// Return value (0 if not available)
+    /// Value the handler returned (also what RAX held on return).
     pub return_value: BigInt,
+    /// First N argument registers captured at hook time.
+    /// N = 6 today (rcx, rdx, r8, r9, stack[0], stack[1]).
+    /// Entries past the real arity of the called function are noise — the
+    /// engine has no per-API signature table — consumers should trim based
+    /// on their own knowledge of the import.
+    pub arguments: Vec<BigInt>,
 }
 
 /// A single Stalker basic block event.
@@ -147,6 +159,61 @@ impl Emulator {
         Ok(BigInt::from(entry as i64))
     }
 
+    /// Project Pythia Oracle Hook — step N instructions (v3.9.0-preview.oracle).
+    /// Like `run()` but takes an explicit max-insns cap so the caller can
+    /// single-step past a just-removed breakpoint before re-adding it. The
+    /// cap overrides the Emulator's construction-time default for this
+    /// invocation only; subsequent run() calls use the original default.
+    #[napi]
+    pub fn run_n(&mut self, start: BigInt, end: BigInt, max_insns: BigInt) -> Result<JsStopReason> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+
+        let start_addr = start.get_u64().1;
+        let end_addr = end.get_u64().1;
+        let cap = max_insns.get_u64().1;
+
+        if self.verbose {
+            eprintln!(
+                "[Elixir] run_n from 0x{:x} to 0x{:x}, max_insns={}",
+                start_addr, end_addr, cap
+            );
+        }
+
+        let run_result = inner.run(start_addr, end_addr, cap);
+        if let Err(ref e) = run_result {
+            if self.verbose {
+                eprintln!("[Elixir] run_n() returned: {:?}", e);
+            }
+        }
+
+        let reason = inner.stop_reason();
+
+        let (kind, message) = match reason {
+            elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
+            elixir_core::types::SimpleStopReason::InsnLimit => {
+                ("insn_limit", format!("Instruction limit reached ({})", cap))
+            }
+            elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
+            elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+            elixir_core::types::SimpleStopReason::Breakpoint => (
+                "breakpoint",
+                "Project Pythia Oracle breakpoint hit".to_string(),
+            ),
+            elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
+        };
+
+        let ip_value = inner.reg_read(41).unwrap_or(0);
+        let instructions_executed = inner.instruction_count();
+
+        Ok(JsStopReason {
+            kind: kind.to_string(),
+            address: BigInt::from(ip_value as i64),
+            instructions_executed: instructions_executed as i64,
+            message,
+        })
+    }
+
     /// Start emulation from the given address.
     /// end=0 means run until stop() or until max_instructions is reached.
     #[napi]
@@ -223,21 +290,24 @@ impl Emulator {
         Ok(inner.api_log_count() as i64)
     }
 
-    /// Get API call log (returns count for now as summary).
-    /// TODO: Return detailed per-call records when API is available.
+    /// Get the detailed API call log — one entry per hooked Win32 call.
     #[napi]
     pub fn get_api_calls(&mut self) -> Result<Vec<JsApiCall>> {
         self.check_disposed()?;
         let inner = self.inner.as_ref().unwrap();
-        let count = inner.api_log_count();
-
-        // Return a single summary entry for now
-        // Future: iterate actual API call records
-        Ok(vec![JsApiCall {
-            name: format!("api_log_count_{}", count),
-            address: BigInt::from(0i64),
-            return_value: BigInt::from(count as i64),
-        }])
+        let entries = inner
+            .api_log_snapshot()
+            .map_err(|e| Error::from_reason(format!("api_log_snapshot: {}", e)))?;
+        Ok(entries
+            .into_iter()
+            .map(|e| JsApiCall {
+                name: e.name,
+                module: e.module,
+                address: BigInt::from(e.pc_address),
+                return_value: BigInt::from(e.return_value),
+                arguments: e.arguments.into_iter().map(BigInt::from).collect(),
+            })
+            .collect())
     }
 
     /// Read a register value.
@@ -339,6 +409,46 @@ impl Emulator {
         self.check_disposed()?;
         let inner = self.inner.as_ref().unwrap();
         Ok(inner.interceptor_log_count() as i64)
+    }
+
+    // === Project Pythia Oracle Hook — Breakpoint API (v3.9.0-preview.oracle) ===
+    // Installs / removes a stop-on-PC breakpoint. emulator.run() returns cleanly
+    // when PC matches and stopReason becomes "breakpoint" (value 5). State is
+    // preserved; call run(currentPc, 0, cap) to resume.
+
+    /// Add a breakpoint at the given PC. emulator.run() will stop when PC reaches it.
+    #[napi]
+    pub fn breakpoint_add(&mut self, address: BigInt) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        let addr = address.get_u64().1;
+        inner
+            .breakpoint_add(addr)
+            .map_err(|e| Error::from_reason(format!("Breakpoint add failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Remove a breakpoint at the given PC.
+    #[napi]
+    pub fn breakpoint_del(&mut self, address: BigInt) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        let addr = address.get_u64().1;
+        inner
+            .breakpoint_del(addr)
+            .map_err(|e| Error::from_reason(format!("Breakpoint del failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Remove all breakpoints in bulk.
+    #[napi]
+    pub fn breakpoint_clear(&mut self) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_mut().unwrap();
+        inner
+            .breakpoint_clear()
+            .map_err(|e| Error::from_reason(format!("Breakpoint clear failed: {}", e)))?;
+        Ok(())
     }
 
     /// Enable Stalker tracing.

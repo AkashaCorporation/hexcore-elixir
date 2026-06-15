@@ -525,6 +525,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 
 ElixirError elixir_stop(ElixirContext* ctx) try {
     if (!ctx || !ctx->uc) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
     ctx->stop_reason = ELIXIR_STOP_USER;
     uc_err err = uc_emu_stop(ctx->uc);
     return uc_err_to_elixir(err);
@@ -533,6 +534,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 
 ElixirError elixir_mem_map(ElixirContext* ctx, uint64_t addr, uint64_t size, uint32_t prot) try {
     if (!ctx || !ctx->mem) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
 
     uint32_t uc_prot = 0;
     if (prot & 1) uc_prot |= UC_PROT_READ;
@@ -580,6 +582,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 
 ElixirError elixir_snapshot_save(ElixirContext* ctx, uint8_t** out_data, size_t* out_len) try {
     if (!ctx || !out_data || !out_len || !ctx->uc) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
 
     // 1. Save CPU context
     uc_context* uc_ctx = nullptr;
@@ -658,6 +661,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_MEMORY)
 
 ElixirError elixir_snapshot_restore(ElixirContext* ctx, const uint8_t* data, size_t len) try {
     if (!ctx || !data || !ctx->uc) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
 
     size_t offset = 0;
 
@@ -815,6 +819,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_STOP_NONE)
 // --- Interceptor C API ---
 ElixirError elixir_interceptor_attach(ElixirContext* ctx, uint64_t addr) try {
     if (!ctx || !ctx->interceptor) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
     ctx->interceptor->attach(addr);
     return ELIXIR_OK;
 }
@@ -822,6 +827,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 
 ElixirError elixir_interceptor_detach(ElixirContext* ctx, uint64_t addr) try {
     if (!ctx || !ctx->interceptor) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
     ctx->interceptor->detach(addr);
     return ELIXIR_OK;
 }
@@ -893,6 +899,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 // --- Stalker C API ---
 ElixirError elixir_stalker_follow(ElixirContext* ctx) try {
     if (!ctx || !ctx->stalker) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
     ctx->stalker->follow();
     return ELIXIR_OK;
 }
@@ -900,6 +907,7 @@ ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_UNICORN)
 
 ElixirError elixir_stalker_unfollow(ElixirContext* ctx) try {
     if (!ctx || !ctx->stalker) return ELIXIR_ERR_ARGS;
+    if (ctx->tainted) return ELIXIR_ERR_UC_FAULT;
     ctx->stalker->unfollow();
     return ELIXIR_OK;
 }

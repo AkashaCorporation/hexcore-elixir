@@ -46,6 +46,12 @@ impl Default for EmulatorConfig {
 pub struct Emulator {
     pub config: EmulatorConfig,
     ctx: *mut ffi::ElixirContext,
+    /// Set once the C++ engine reports ELIXIR_ERR_UC_FAULT from a run.
+    /// A tainted engine must not re-enter libuc; every forwarding method
+    /// that would touch libuc short-circuits via check_tainted() so the
+    /// bridge never round-trips the FFI on a context already known to be
+    /// unusable. Mirrors the C++ ctx->tainted guard (defense in depth).
+    tainted: bool,
 }
 
 // Safety: ElixirContext is thread-safe on the C++ side
@@ -65,17 +71,37 @@ impl Emulator {
             ));
         }
 
-        Ok(Self { config, ctx })
+        Ok(Self { config, ctx, tainted: false })
+    }
+
+    /// Returns an error if the engine was tainted by a prior libuc fault.
+    /// Mirrors the C++ ctx->tainted guard so the bridge refuses to re-enter
+    /// libuc (which would re-fault) on a context already known to be dead.
+    #[inline]
+    fn check_tainted(&self) -> ElixirResult<()> {
+        if self.tainted {
+            return Err(error_code_to_error(ffi::ElixirErrorCode::UcFault));
+        }
+        Ok(())
+    }
+
+    /// Whether a prior run faulted (SEH access violation inside libuc JIT).
+    /// A tainted engine is unusable and must be dropped; this lets the bridge
+    /// surface that to callers without an FFI round-trip.
+    pub fn is_tainted(&self) -> bool {
+        self.tainted
     }
 
     /// Map a memory region
     pub fn mem_map(&mut self, addr: u64, size: u64, prot: MemProt) -> ElixirResult<()> {
+        self.check_tainted()?;
         let result = unsafe { ffi::elixir_mem_map(self.ctx, addr, size, prot.bits()) };
         error_code_to_result(result)
     }
 
     /// Read memory from the emulator
     pub fn mem_read(&mut self, addr: u64, buf: &mut [u8]) -> ElixirResult<()> {
+        self.check_tainted()?;
         let result = unsafe {
             ffi::elixir_mem_read(self.ctx, addr, buf.as_mut_ptr(), buf.len())
         };
@@ -84,6 +110,7 @@ impl Emulator {
 
     /// Write memory to the emulator
     pub fn mem_write(&mut self, addr: u64, data: &[u8]) -> ElixirResult<()> {
+        self.check_tainted()?;
         let result = unsafe {
             ffi::elixir_mem_write(self.ctx, addr, data.as_ptr(), data.len())
         };
@@ -92,6 +119,7 @@ impl Emulator {
 
     /// Read a register value
     pub fn reg_read(&mut self, reg_id: u32) -> ElixirResult<u64> {
+        self.check_tainted()?;
         let mut value: u64 = 0;
         let result = unsafe { ffi::elixir_reg_read(self.ctx, reg_id, &mut value) };
         error_code_to_result(result)?;
@@ -100,6 +128,7 @@ impl Emulator {
 
     /// Write a register value
     pub fn reg_write(&mut self, reg_id: u32, value: u64) -> ElixirResult<()> {
+        self.check_tainted()?;
         let result = unsafe { ffi::elixir_reg_write(self.ctx, reg_id, value) };
         error_code_to_result(result)
     }
@@ -123,6 +152,9 @@ impl Emulator {
 
     /// Start emulation from the given address
     pub fn run(&mut self, start: u64, end: u64, max_insns: u64) -> ElixirResult<StopReason> {
+        // Re-running a tainted engine re-enters uc_emu_start on a libuc whose
+        // JIT state is corrupted - refuse before the FFI call.
+        self.check_tainted()?;
         let result = unsafe { ffi::elixir_run(self.ctx, start, end, max_insns) };
 
         match result {
@@ -131,12 +163,20 @@ impl Emulator {
                 // In future phases, we'll get actual stop reason from context
                 Ok(StopReason::InstructionLimit(max_insns))
             }
+            ffi::ElixirErrorCode::UcFault => {
+                // The C++ engine caught an SEH fault inside libuc and marked
+                // its ctx tainted. Mirror that here so every later forwarding
+                // call short-circuits without re-entering the dead engine.
+                self.tainted = true;
+                Err(error_code_to_error(result))
+            }
             _ => Err(error_code_to_error(result)),
         }
     }
 
     /// Stop emulation
     pub fn stop(&mut self) -> ElixirResult<()> {
+        self.check_tainted()?;
         let result = unsafe { ffi::elixir_stop(self.ctx) };
         error_code_to_result(result)
     }
@@ -168,6 +208,7 @@ impl Emulator {
 
     /// Save a full snapshot of the emulation state
     pub fn snapshot_save(&self) -> ElixirResult<Vec<u8>> {
+        self.check_tainted()?;
         let mut data_ptr: *mut u8 = std::ptr::null_mut();
         let mut data_len: usize = 0;
         let err = unsafe {
@@ -187,6 +228,7 @@ impl Emulator {
 
     /// Restore from a snapshot
     pub fn snapshot_restore(&mut self, data: &[u8]) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe {
             ffi::elixir_snapshot_restore(self.ctx, data.as_ptr(), data.len())
         };
@@ -202,6 +244,7 @@ impl Emulator {
     /// The engine allocates the JSON blob and we deserialise it once here;
     /// prefer this over api_log_count when downstream needs names/args/pc.
     pub fn api_log_snapshot(&self) -> ElixirResult<Vec<ApiLogEntry>> {
+        self.check_tainted()?;
         let mut data_ptr: *mut u8 = std::ptr::null_mut();
         let mut data_len: usize = 0;
         let err = unsafe {
@@ -224,11 +267,13 @@ impl Emulator {
 
     // Interceptor
     pub fn interceptor_attach(&mut self, addr: u64) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_interceptor_attach(self.ctx, addr) };
         error_code_to_result(err)
     }
 
     pub fn interceptor_detach(&mut self, addr: u64) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_interceptor_detach(self.ctx, addr) };
         error_code_to_result(err)
     }
@@ -241,27 +286,32 @@ impl Emulator {
     // elixir_run() stops cleanly when PC matches any registered address.
     // The engine sets stop_reason to ELIXIR_STOP_BREAKPOINT (value 5).
     pub fn breakpoint_add(&mut self, addr: u64) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_breakpoint_add(self.ctx, addr) };
         error_code_to_result(err)
     }
 
     pub fn breakpoint_del(&mut self, addr: u64) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_breakpoint_del(self.ctx, addr) };
         error_code_to_result(err)
     }
 
     pub fn breakpoint_clear(&mut self) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_breakpoint_clear(self.ctx) };
         error_code_to_result(err)
     }
 
     // Stalker
     pub fn stalker_follow(&mut self) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_stalker_follow(self.ctx) };
         error_code_to_result(err)
     }
 
     pub fn stalker_unfollow(&mut self) -> ElixirResult<()> {
+        self.check_tainted()?;
         let err = unsafe { ffi::elixir_stalker_unfollow(self.ctx) };
         error_code_to_result(err)
     }
