@@ -72,9 +72,24 @@ Copy-Item "$DEPS_SRC\include\unicorn\*" "$OUTPUT_DIR\deps\hexcore-unicorn\includ
 Copy-Item "$DEPS_SRC\lib\unicorn-import.lib" "$OUTPUT_DIR\deps\hexcore-unicorn\lib\" -Force
 Copy-Item "$DEPS_SRC\bin\unicorn.dll" "$OUTPUT_DIR\deps\hexcore-unicorn\bin\" -Force
 
-if (Test-Path "$DEPS_SRC\VERSION.md") {
-    Copy-Item "$DEPS_SRC\VERSION.md" "$OUTPUT_DIR\deps\hexcore-unicorn\VERSION.md" -Force
-}
+$provenance = @'
+# Elixir Windows dependency bundle
+
+- Elixir wrapper: 1.0.3
+- hexcore-unicorn wrapper: 1.3.1
+- Unicorn Engine ABI: 2.1
+- LLVM ABI: 18.1.8
+- Target: win32-x64
+
+This archive contains only the Unicorn C headers, Windows import library,
+runtime DLL, and the prebuilt Elixir static library required by the HexCore
+Windows prebuild workflow.
+
+Elixir source is Apache-2.0. Unicorn Engine and the HexCore Unicorn wrapper are
+GPL-2.0-only. Distributions that combine these artifacts must satisfy the terms
+of every included component; this bundle does not claim a linking exception.
+'@
+Set-Content -Path "$OUTPUT_DIR\deps\hexcore-unicorn\VERSION.md" -Value $provenance
 
 # Pre-built Elixir engine static lib (consumed by Rust build.rs link search)
 # Mirrors the Helix pattern where helix_engine.lib is bundled in the deps zip.
