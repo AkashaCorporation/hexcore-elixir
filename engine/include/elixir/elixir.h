@@ -133,6 +133,26 @@ ELIXIR_EXPORT ElixirError elixir_stalker_unfollow(ElixirContext* ctx);
 ELIXIR_EXPORT uint64_t elixir_stalker_block_count(ElixirContext* ctx);
 ELIXIR_EXPORT ElixirError elixir_stalker_export_drcov(ElixirContext* ctx, uint8_t** out_data, size_t* out_len);
 
+// --- VFS ---
+// Create a virtual file with the given content (for pre-populating the VFS)
+ELIXIR_EXPORT ElixirError elixir_vfs_create_file(ElixirContext* ctx,
+                                                  const char* path,
+                                                  const uint8_t* data,
+                                                  uint64_t len);
+// Create a virtual directory
+ELIXIR_EXPORT ElixirError elixir_vfs_create_dir(ElixirContext* ctx, const char* path);
+
+// Get captured stdout output (null-terminated, caller must free via elixir_snapshot_free)
+ELIXIR_EXPORT ElixirError elixir_vfs_get_stdout(ElixirContext* ctx,
+                                                 uint8_t** out_data,
+                                                 size_t* out_len);
+// Get captured stderr output (null-terminated, caller must free via elixir_snapshot_free)
+ELIXIR_EXPORT ElixirError elixir_vfs_get_stderr(ElixirContext* ctx,
+                                                 uint8_t** out_data,
+                                                 size_t* out_len);
+// Clear captured stdout/stderr buffers
+ELIXIR_EXPORT ElixirError elixir_vfs_clear_output(ElixirContext* ctx);
+
 #ifdef __cplusplus
 }
 #endif

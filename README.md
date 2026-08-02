@@ -11,7 +11,7 @@ Elixir was designed from the ground up to replace GPLv3 frameworks like Qiling, 
 - **CPU Emulation** — Drives execution through HexCore-Unicorn with advanced memory fault handling and JIT block caching.
 - **Clean-Room OS Emulation** — Implements PE/ELF/Mach-O loaders, thread management, and syscall routing from scratch. No GPL code.
 - **Frida-Style Instrumentation** — Built-in Interceptor API for inline hooking, memory access tracking, and Stalker-like basic block tracing directly at the emulation layer.
-- **Virtual Environment Mocking** — Fully isolated Virtual File System (VFS), fake Windows Registry, and mock network sockets.
+- **Virtual Environment Mocking** — Fully isolated Virtual File System (VFS), captured process output, fake Windows Registry, and mock network sockets.
 - **Snapshot & Restore** — Deterministic memory and CPU context snapshotting for fuzzing and time-travel debugging.
 - **Cross-Architecture** — Supports x86, x86_64, ARM, and ARM64 out of the box.
 
@@ -51,7 +51,7 @@ HexCore-Elixir/
 - **Node.js** 22+
 - **CMake** 3.20+
 - A **C++23** toolchain (MSVC 2022 / GCC 13+ / Clang 16+)
-- **HexCore-Unicorn** (pulled automatically via git submodules or Rust build script)
+- **HexCore-Unicorn** development payload in `deps/hexcore-unicorn/` (the release workflow restores the versioned dependency asset)
 
 ## Build
 
@@ -67,6 +67,7 @@ cmake --build engine/build --config Release
 ```bash
 npm install
 npm run build
+npm test
 ```
 
 ### 3. Run the CLI

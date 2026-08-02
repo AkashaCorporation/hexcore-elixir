@@ -13,6 +13,7 @@
 use crate::error::ElixirResult;
 use crate::os::OsSubsystem;
 
+#[derive(Default)]
 pub struct WindowsSubsystem {
     // TODO: PEB/TEB addresses, loaded modules list, heap state, registry VFS
 }

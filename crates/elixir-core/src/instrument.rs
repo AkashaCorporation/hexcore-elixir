@@ -14,6 +14,7 @@ use crate::error::ElixirResult;
 use crate::types::HookType;
 
 /// Interceptor — inline function hooking at the emulation layer
+#[derive(Default)]
 pub struct Interceptor {
     // TODO: hook table, trampoline management
 }
@@ -41,6 +42,7 @@ impl Interceptor {
 }
 
 /// Stalker — basic block level tracing (like Frida's Stalker)
+#[derive(Default)]
 pub struct Stalker {
     // TODO: trace buffer, block coverage set
 }

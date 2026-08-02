@@ -16,7 +16,8 @@ fn create_windows_emulator() -> Emulator {
         permissive_memory: true,
     };
     let mut emu = Emulator::new(config).expect("Failed to create emulator");
-    emu.set_permissive_memory(true).expect("enable permissive memory");
+    emu.set_permissive_memory(true)
+        .expect("enable permissive memory");
     emu
 }
 
@@ -50,7 +51,9 @@ fn api_log_returns_detailed_entries() {
     // "api_log_count_<N>" with address 0. If this ever reappears, the
     // C++ engine is logging summaries instead of per-call records.
     assert!(
-        entries.iter().all(|e| !e.name.starts_with("api_log_count_")),
+        entries
+            .iter()
+            .all(|e| !e.name.starts_with("api_log_count_")),
         "found legacy stub 'api_log_count_*' — get_api_calls regressed"
     );
 
@@ -60,12 +63,16 @@ fn api_log_returns_detailed_entries() {
         // have fired from there; a pc of 0 means the stub address was
         // not threaded through when the log entry was written.
         assert!(
-            entries.iter().all(|e| e.pc_address >= 0x70000000 && e.pc_address < 0x70100000),
+            entries
+                .iter()
+                .all(|e| e.pc_address >= 0x70000000 && e.pc_address < 0x70100000),
             "pc_address outside stub region — wire-up broken"
         );
 
         assert!(
-            entries.iter().all(|e| !e.name.is_empty() && e.name != "unknown"),
+            entries
+                .iter()
+                .all(|e| !e.name.is_empty() && e.name != "unknown"),
             "found entries with missing/unknown names"
         );
 
@@ -79,6 +86,8 @@ fn api_log_returns_detailed_entries() {
             entries[0].arguments.len()
         );
     } else {
-        println!("api_log_detail: zero calls captured (PE may have exited before any import fired)");
+        println!(
+            "api_log_detail: zero calls captured (PE may have exited before any import fired)"
+        );
     }
 }

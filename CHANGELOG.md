@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.3 - VFS propagation and real release gates (2026-08-02)
+
+- Added a functional virtual filesystem with normalized Windows/POSIX paths, files, directories, handles, seek/truncate behavior, and bounded guest-memory I/O.
+- Routed Linux `read`, `write`, `open`, `close`, `lseek`, `writev`, and `access` through the VFS instead of success-only stubs.
+- Routed Win32 file APIs including `CreateFileA/W`, `ReadFile`, `WriteFile`, `CloseHandle`, `GetFileSize`, and `SetFilePointer` through the same virtual state.
+- Exposed VFS file/directory creation and captured stdout/stderr through the C ABI, Rust core, N-API bridge, and TypeScript definitions.
+- Added Rust VFS coverage and replaced the package's placeholder test command with the real workspace suite.
+- Made NAPI builds emit the root loader and type definitions declared by `package.json`.
+
 ## 1.0.0 — Handback Accepted (2026-04-14, evening)
 
 **Clean-room audit PASSED** by the HexCore monorepo maintainer on swarm handback. Independent review of the four most critical source files (`engine/src/core/engine.cpp`, `engine/src/loader/pe_loader.cpp`, `engine/src/loader/elf_loader.cpp`, `engine/src/os/windows/api_hooks.cpp`) found:

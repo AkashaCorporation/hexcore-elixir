@@ -35,8 +35,8 @@ impl Default for EmulatorConfig {
         Self {
             arch: Arch::X86_64,
             os: OsType::Linux,
-            stack_size: 2 * 1024 * 1024,   // 2 MB
-            heap_size: 16 * 1024 * 1024,   // 16 MB
+            stack_size: 2 * 1024 * 1024, // 2 MB
+            heap_size: 16 * 1024 * 1024, // 16 MB
             permissive_memory: false,
         }
     }
@@ -71,7 +71,11 @@ impl Emulator {
             ));
         }
 
-        Ok(Self { config, ctx, tainted: false })
+        Ok(Self {
+            config,
+            ctx,
+            tainted: false,
+        })
     }
 
     /// Returns an error if the engine was tainted by a prior libuc fault.
@@ -102,18 +106,14 @@ impl Emulator {
     /// Read memory from the emulator
     pub fn mem_read(&mut self, addr: u64, buf: &mut [u8]) -> ElixirResult<()> {
         self.check_tainted()?;
-        let result = unsafe {
-            ffi::elixir_mem_read(self.ctx, addr, buf.as_mut_ptr(), buf.len())
-        };
+        let result = unsafe { ffi::elixir_mem_read(self.ctx, addr, buf.as_mut_ptr(), buf.len()) };
         error_code_to_result(result)
     }
 
     /// Write memory to the emulator
     pub fn mem_write(&mut self, addr: u64, data: &[u8]) -> ElixirResult<()> {
         self.check_tainted()?;
-        let result = unsafe {
-            ffi::elixir_mem_write(self.ctx, addr, data.as_ptr(), data.len())
-        };
+        let result = unsafe { ffi::elixir_mem_write(self.ctx, addr, data.as_ptr(), data.len()) };
         error_code_to_result(result)
     }
 
@@ -136,14 +136,8 @@ impl Emulator {
     /// Load a binary into the emulator
     pub fn load(&mut self, data: &[u8]) -> ElixirResult<u64> {
         let mut entry_point: u64 = 0;
-        let err = unsafe {
-            ffi::elixir_load(
-                self.ctx,
-                data.as_ptr(),
-                data.len(),
-                &mut entry_point,
-            )
-        };
+        let err =
+            unsafe { ffi::elixir_load(self.ctx, data.as_ptr(), data.len(), &mut entry_point) };
         match err {
             ffi::ElixirErrorCode::Ok => Ok(entry_point),
             _ => Err(error_code_to_error(err)),
@@ -211,9 +205,7 @@ impl Emulator {
         self.check_tainted()?;
         let mut data_ptr: *mut u8 = std::ptr::null_mut();
         let mut data_len: usize = 0;
-        let err = unsafe {
-            ffi::elixir_snapshot_save(self.ctx, &mut data_ptr, &mut data_len)
-        };
+        let err = unsafe { ffi::elixir_snapshot_save(self.ctx, &mut data_ptr, &mut data_len) };
         error_code_to_result(err)?;
         if data_ptr.is_null() || data_len == 0 {
             return Err(ElixirError::Memory {
@@ -229,9 +221,7 @@ impl Emulator {
     /// Restore from a snapshot
     pub fn snapshot_restore(&mut self, data: &[u8]) -> ElixirResult<()> {
         self.check_tainted()?;
-        let err = unsafe {
-            ffi::elixir_snapshot_restore(self.ctx, data.as_ptr(), data.len())
-        };
+        let err = unsafe { ffi::elixir_snapshot_restore(self.ctx, data.as_ptr(), data.len()) };
         error_code_to_result(err)
     }
 
@@ -247,9 +237,7 @@ impl Emulator {
         self.check_tainted()?;
         let mut data_ptr: *mut u8 = std::ptr::null_mut();
         let mut data_len: usize = 0;
-        let err = unsafe {
-            ffi::elixir_api_log_to_json(self.ctx, &mut data_ptr, &mut data_len)
-        };
+        let err = unsafe { ffi::elixir_api_log_to_json(self.ctx, &mut data_ptr, &mut data_len) };
         error_code_to_result(err)?;
         if data_ptr.is_null() || data_len == 0 {
             return Ok(Vec::new());
@@ -323,21 +311,78 @@ impl Emulator {
     pub fn stalker_export_drcov(&self) -> ElixirResult<Vec<u8>> {
         let mut data_ptr: *mut u8 = std::ptr::null_mut();
         let mut data_len: usize = 0;
-        let err = unsafe {
-            ffi::elixir_stalker_export_drcov(self.ctx, &mut data_ptr, &mut data_len)
-        };
+        let err =
+            unsafe { ffi::elixir_stalker_export_drcov(self.ctx, &mut data_ptr, &mut data_len) };
         error_code_to_result(err)?;
         if data_ptr.is_null() || data_len == 0 {
             return Ok(Vec::new());
         }
         let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len).to_vec() };
-        unsafe { ffi::elixir_snapshot_free(data_ptr) };  // Uses same free function (delete[])
+        unsafe { ffi::elixir_snapshot_free(data_ptr) }; // Uses same free function (delete[])
         Ok(data)
     }
 
     /// Get the actual number of instructions executed in the last run
     pub fn instruction_count(&self) -> u64 {
         unsafe { ffi::elixir_get_instruction_count(self.ctx) }
+    }
+
+    // --- VFS ---
+
+    /// Create a virtual file with the given content
+    pub fn vfs_create_file(&self, path: &str, data: &[u8]) -> ElixirResult<()> {
+        let c_path = std::ffi::CString::new(path)
+            .map_err(|_| ElixirError::Ffi("Invalid path".to_string()))?;
+        let err = unsafe {
+            ffi::elixir_vfs_create_file(self.ctx, c_path.as_ptr(), data.as_ptr(), data.len() as u64)
+        };
+        error_code_to_result(err)
+    }
+
+    /// Create a virtual directory
+    pub fn vfs_create_dir(&self, path: &str) -> ElixirResult<()> {
+        let c_path = std::ffi::CString::new(path)
+            .map_err(|_| ElixirError::Ffi("Invalid path".to_string()))?;
+        let err = unsafe { ffi::elixir_vfs_create_dir(self.ctx, c_path.as_ptr()) };
+        error_code_to_result(err)
+    }
+
+    /// Get captured stdout output
+    pub fn vfs_get_stdout(&self) -> ElixirResult<String> {
+        let mut data_ptr: *mut u8 = std::ptr::null_mut();
+        let mut data_len: usize = 0;
+        let err = unsafe { ffi::elixir_vfs_get_stdout(self.ctx, &mut data_ptr, &mut data_len) };
+        error_code_to_result(err)?;
+        if data_ptr.is_null() {
+            return Ok(String::new());
+        }
+        let s = unsafe { std::ffi::CStr::from_ptr(data_ptr as *const std::ffi::c_char) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::elixir_snapshot_free(data_ptr) };
+        Ok(s)
+    }
+
+    /// Get captured stderr output
+    pub fn vfs_get_stderr(&self) -> ElixirResult<String> {
+        let mut data_ptr: *mut u8 = std::ptr::null_mut();
+        let mut data_len: usize = 0;
+        let err = unsafe { ffi::elixir_vfs_get_stderr(self.ctx, &mut data_ptr, &mut data_len) };
+        error_code_to_result(err)?;
+        if data_ptr.is_null() {
+            return Ok(String::new());
+        }
+        let s = unsafe { std::ffi::CStr::from_ptr(data_ptr as *const std::ffi::c_char) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::elixir_snapshot_free(data_ptr) };
+        Ok(s)
+    }
+
+    /// Clear captured stdout/stderr buffers
+    pub fn vfs_clear_output(&self) -> ElixirResult<()> {
+        let err = unsafe { ffi::elixir_vfs_clear_output(self.ctx) };
+        error_code_to_result(err)
     }
 }
 

@@ -9,6 +9,7 @@
 use crate::error::ElixirResult;
 use crate::os::OsSubsystem;
 
+#[derive(Default)]
 pub struct LinuxSubsystem {
     // TODO: brk pointer, mmap state, fd table, signal handlers
 }

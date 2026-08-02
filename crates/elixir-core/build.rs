@@ -26,7 +26,10 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", engine_dir.display());
         println!("cargo:rustc-link-lib=static=elixir_engine");
     } else {
-        println!("cargo:warning=Engine library not found at {:?} — build it first:", engine_dir);
+        println!(
+            "cargo:warning=Engine library not found at {:?} — build it first:",
+            engine_dir
+        );
         println!("cargo:warning=  cmake -B engine/build -S engine -DCMAKE_BUILD_TYPE=Release");
         println!("cargo:warning=  cmake --build engine/build --config Release");
     }
@@ -37,14 +40,20 @@ fn main() {
     let unicorn_bin_dir = crate_root.join("../../deps/hexcore-unicorn/bin");
 
     if unicorn_lib_dir.exists() {
-        println!("cargo:rustc-link-search=native={}", unicorn_lib_dir.display());
+        println!(
+            "cargo:rustc-link-search=native={}",
+            unicorn_lib_dir.display()
+        );
         // `unicorn-import.lib` is the Windows import library; it loads unicorn.dll at runtime.
         #[cfg(target_os = "windows")]
         {
             println!("cargo:rustc-link-lib=dylib=unicorn-import");
         }
     } else {
-        println!("cargo:warning=Vendored hexcore-unicorn not found at {:?}", unicorn_lib_dir);
+        println!(
+            "cargo:warning=Vendored hexcore-unicorn not found at {:?}",
+            unicorn_lib_dir
+        );
         println!("cargo:warning=See deps/hexcore-unicorn/VERSION.md");
     }
 

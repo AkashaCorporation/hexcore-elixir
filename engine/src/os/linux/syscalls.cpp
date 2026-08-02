@@ -27,6 +27,17 @@ uint64_t LinuxSyscallHandler::read_reg(uc_engine* uc, int reg) {
     return val;
 }
 
+// Read a null-terminated string from emulated memory
+static std::string read_guest_string(uc_engine* uc, uint64_t addr, size_t max_len = 4096) {
+    std::string result;
+    for (size_t i = 0; i < max_len; i++) {
+        uint8_t ch = 0;
+        if (uc_mem_read(uc, addr + i, &ch, 1) != UC_ERR_OK || ch == 0) break;
+        result += static_cast<char>(ch);
+    }
+    return result;
+}
+
 // --- Constructor / Destructor ---
 
 LinuxSyscallHandler::LinuxSyscallHandler(uc_engine* uc, MemoryManager* mem, ElixirContext* ctx)
@@ -82,6 +93,9 @@ void LinuxSyscallHandler::dispatch(uc_engine* uc) {
         case 3:   // sys_close
             result = sys_close(rdi);
             break;
+        case 8:   // sys_lseek
+            result = sys_lseek(rdi, rsi, rdx);
+            break;
         case 9:   // sys_mmap
             result = sys_mmap(rdi, rsi, rdx, r10, r8, r9);
             break;
@@ -124,36 +138,74 @@ void LinuxSyscallHandler::dispatch(uc_engine* uc) {
 // --- Syscall implementations ---
 
 int64_t LinuxSyscallHandler::sys_read(uint64_t fd, uint64_t buf, uint64_t count) {
-    (void)buf;
-    (void)count;
-    
-    if (fd == 0) {
-        return 0;  // EOF for stdin
-    }
-    
-    return -LINUX_EBADF;
+    if (!ctx_ || !ctx_->vfs) return -LINUX_EBADF;
+
+    // stdin
+    if (fd == 0) return 0;  // EOF for stdin
+
+    // Map Linux fd to VFS handle: Linux fds 3+ map to VFS_HANDLE_BASE + (fd - 3)
+    uint64_t handle = (fd <= 2) ? fd : (VFS_HANDLE_BASE + (fd - 3));
+
+    return ctx_->vfs->read(handle, buf, count);
 }
 
 int64_t LinuxSyscallHandler::sys_write(uint64_t fd, uint64_t buf, uint64_t count) {
-    (void)buf;
-    
+    if (!ctx_ || !ctx_->vfs) return -LINUX_EBADF;
+
+    // stdout/stderr — map to VFS console handles
     if (fd == 1 || fd == 2) {
-        return static_cast<int64_t>(count);
+        uint64_t handle = (fd == 1) ? VFS_HANDLE_STDOUT : VFS_HANDLE_STDERR;
+        return ctx_->vfs->write(handle, buf, count);
     }
-    
-    return -LINUX_EBADF;
+
+    // Regular file fd
+    uint64_t handle = VFS_HANDLE_BASE + (fd - 3);
+    return ctx_->vfs->write(handle, buf, count);
 }
 
 int64_t LinuxSyscallHandler::sys_open(uint64_t pathname, uint64_t flags, uint64_t mode) {
-    (void)pathname;
-    (void)flags;
-    (void)mode;
-    return -LINUX_ENOENT;
+    if (!ctx_ || !ctx_->vfs) return -LINUX_ENOENT;
+
+    std::string path = read_guest_string(uc_, pathname);
+    if (path.empty()) return -LINUX_ENOENT;
+
+    // Translate Linux flags to VFS flags
+    uint32_t vfs_flags = 0;
+    uint32_t access = flags & 0x3;  // O_RDONLY=0, O_WRONLY=1, O_RDWR=2
+    vfs_flags |= access;
+    if (flags & 0x40)   vfs_flags |= VFS_O_CREAT;    // O_CREAT = 0x40
+    if (flags & 0x200)  vfs_flags |= VFS_O_TRUNC;    // O_TRUNC = 0x200
+    if (flags & 0x400)  vfs_flags |= VFS_O_APPEND;   // O_APPEND = 0x400
+
+    uint64_t handle = ctx_->vfs->open(path, vfs_flags, static_cast<uint32_t>(mode));
+    if (handle == 0) return -LINUX_ENOENT;
+
+    // Convert VFS handle back to Linux fd (3+)
+    return static_cast<int64_t>(handle - VFS_HANDLE_BASE + 3);
 }
 
 int64_t LinuxSyscallHandler::sys_close(uint64_t fd) {
-    (void)fd;
+    if (!ctx_ || !ctx_->vfs) return 0;
+
+    if (fd <= 2) return 0;  // Don't close stdin/stdout/stderr
+
+    uint64_t handle = VFS_HANDLE_BASE + (fd - 3);
+    ctx_->vfs->close(handle);
     return 0;
+}
+
+int64_t LinuxSyscallHandler::sys_lseek(uint64_t fd, uint64_t offset, uint64_t whence) {
+    if (!ctx_ || !ctx_->vfs) return -LINUX_EBADF;
+
+    if (fd <= 2) return -LINUX_EBADF;  // Can't seek on console
+
+    uint64_t handle = VFS_HANDLE_BASE + (fd - 3);
+
+    int vfs_whence = VFS_SEEK_SET;
+    if (whence == 1) vfs_whence = VFS_SEEK_CUR;
+    if (whence == 2) vfs_whence = VFS_SEEK_END;
+
+    return ctx_->vfs->seek(handle, static_cast<int64_t>(offset), vfs_whence);
 }
 
 int64_t LinuxSyscallHandler::sys_mmap(uint64_t addr, uint64_t len, uint64_t prot,
@@ -298,19 +350,40 @@ int64_t LinuxSyscallHandler::sys_ioctl(uint64_t fd, uint64_t cmd, uint64_t arg) 
 }
 
 int64_t LinuxSyscallHandler::sys_writev(uint64_t fd, uint64_t iov, uint64_t iovcnt) {
-    (void)iov;
-    
+    if (!ctx_ || !ctx_->vfs) return -LINUX_EBADF;
+
+    // stdout/stderr — write scatter-gather buffers through VFS
     if (fd == 1 || fd == 2) {
-        return static_cast<int64_t>(iovcnt * 64);
+        uint64_t handle = (fd == 1) ? VFS_HANDLE_STDOUT : VFS_HANDLE_STDERR;
+        int64_t total = 0;
+
+        // Each iov entry is {void* iov_base, size_t iov_len} = 16 bytes on x86_64
+        for (uint64_t i = 0; i < iovcnt; i++) {
+            uint64_t iov_base = 0;
+            uint64_t iov_len = 0;
+            uc_mem_read(uc_, iov + i * 16, &iov_base, 8);
+            uc_mem_read(uc_, iov + i * 16 + 8, &iov_len, 8);
+
+            if (iov_len > 0) {
+                int64_t written = ctx_->vfs->write(handle, iov_base, iov_len);
+                if (written > 0) total += written;
+            }
+        }
+        return total;
     }
-    
+
     return -LINUX_EBADF;
 }
 
 int64_t LinuxSyscallHandler::sys_access(uint64_t pathname, uint64_t mode) {
-    (void)pathname;
     (void)mode;
-    return -LINUX_ENOENT;
+    if (!ctx_ || !ctx_->vfs) return -LINUX_ENOENT;
+
+    std::string path = read_guest_string(uc_, pathname);
+    if (path.empty()) return -LINUX_ENOENT;
+
+    auto st = ctx_->vfs->stat(path);
+    return st.exists ? 0 : -LINUX_ENOENT;
 }
 
 int64_t LinuxSyscallHandler::sys_exit(uint64_t code) {

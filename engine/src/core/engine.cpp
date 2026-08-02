@@ -263,6 +263,8 @@ ElixirContext* elixir_create(ElixirArch arch, ElixirOs os) try {
 
     ctx->interceptor = std::make_unique<Interceptor>(ctx->uc, ctx->mem.get());
     ctx->stalker = std::make_unique<Stalker>(ctx->uc);
+    ctx->vfs = std::make_unique<VirtualFileSystem>(ctx->uc);
+    ctx->vfs->init_console();
 
     // Stack-local hook handles initialized to 0 so a failing uc_hook_add
     // never leaves a garbage value anywhere we might read later.
@@ -338,6 +340,8 @@ void elixir_destroy(ElixirContext* ctx) try {
     ctx->linux_stubs.reset();
     // linux_syscalls uses uc hooks, destroy before mem
     ctx->linux_syscalls.reset();
+    // VFS uses uc for guest memory read/write, destroy before win32_hooks
+    ctx->vfs.reset();
     // win32_hooks uses mem and uc, so it must be destroyed before mem
     ctx->win32_hooks.reset();
     // MemoryManager must be destroyed before uc_close (it needs uc for hook removal)
@@ -935,5 +939,50 @@ uint64_t elixir_get_instruction_count(ElixirContext* ctx) try {
     return ctx->instruction_count;
 }
 ELIXIR_FFI_CATCH_RETURN(0)
+
+// --- VFS ---
+
+ElixirError elixir_vfs_create_file(ElixirContext* ctx, const char* path,
+                                    const uint8_t* data, uint64_t len) try {
+    if (!ctx || !ctx->vfs || !path) return ELIXIR_ERR_ARGS;
+    std::vector<uint8_t> content(data, data + len);
+    ctx->vfs->create_file(path, content);
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_ARGS)
+
+ElixirError elixir_vfs_create_dir(ElixirContext* ctx, const char* path) try {
+    if (!ctx || !ctx->vfs || !path) return ELIXIR_ERR_ARGS;
+    ctx->vfs->create_dir(path);
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_ARGS)
+
+ElixirError elixir_vfs_get_stdout(ElixirContext* ctx, uint8_t** out_data, size_t* out_len) try {
+    if (!ctx || !ctx->vfs || !out_data || !out_len) return ELIXIR_ERR_ARGS;
+    std::string s = ctx->vfs->get_stdout();
+    *out_len = s.size();
+    *out_data = new uint8_t[s.size() + 1];
+    memcpy(*out_data, s.c_str(), s.size() + 1);
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_ARGS)
+
+ElixirError elixir_vfs_get_stderr(ElixirContext* ctx, uint8_t** out_data, size_t* out_len) try {
+    if (!ctx || !ctx->vfs || !out_data || !out_len) return ELIXIR_ERR_ARGS;
+    std::string s = ctx->vfs->get_stderr();
+    *out_len = s.size();
+    *out_data = new uint8_t[s.size() + 1];
+    memcpy(*out_data, s.c_str(), s.size() + 1);
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_ARGS)
+
+ElixirError elixir_vfs_clear_output(ElixirContext* ctx) try {
+    if (!ctx || !ctx->vfs) return ELIXIR_ERR_ARGS;
+    ctx->vfs->clear_output();
+    return ELIXIR_OK;
+}
+ELIXIR_FFI_CATCH_RETURN(ELIXIR_ERR_ARGS)
 
 } // extern "C"

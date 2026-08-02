@@ -6,6 +6,7 @@
 use crate::error::ElixirResult;
 use crate::os::OsSubsystem;
 
+#[derive(Default)]
 pub struct MacOsSubsystem;
 
 impl MacOsSubsystem {

@@ -32,7 +32,7 @@ pub fn detect_format(data: &[u8]) -> Option<BinaryFormat> {
         return None;
     }
     match &data[..4] {
-        [0x4D, 0x5A, ..] => Some(BinaryFormat::PE),       // MZ
+        [0x4D, 0x5A, ..] => Some(BinaryFormat::PE),          // MZ
         [0x7F, 0x45, 0x4C, 0x46] => Some(BinaryFormat::ELF), // \x7FELF
         [0xFE, 0xED, 0xFA, 0xCE] => Some(BinaryFormat::MachO), // Mach-O 32
         [0xFE, 0xED, 0xFA, 0xCF] => Some(BinaryFormat::MachO), // Mach-O 64

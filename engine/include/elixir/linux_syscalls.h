@@ -101,6 +101,7 @@ private:
     int64_t sys_ioctl(uint64_t fd, uint64_t cmd, uint64_t arg);
     int64_t sys_writev(uint64_t fd, uint64_t iov, uint64_t iovcnt);
     int64_t sys_access(uint64_t pathname, uint64_t mode);
+    int64_t sys_lseek(uint64_t fd, uint64_t offset, uint64_t whence);
     int64_t sys_exit(uint64_t code);
     int64_t sys_arch_prctl(uint64_t code, uint64_t addr);
     int64_t sys_exit_group(uint64_t code);

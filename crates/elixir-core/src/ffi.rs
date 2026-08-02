@@ -65,11 +65,7 @@ extern "C" {
     pub fn elixir_stop(ctx: *mut ElixirContext) -> ElixirErrorCode;
     pub fn elixir_get_stop_reason(ctx: *mut ElixirContext) -> i32;
 
-    pub fn elixir_set_option(
-        ctx: *mut ElixirContext,
-        option: i32,
-        value: u64,
-    ) -> ElixirErrorCode;
+    pub fn elixir_set_option(ctx: *mut ElixirContext, option: i32, value: u64) -> ElixirErrorCode;
 
     pub fn elixir_mem_map(
         ctx: *mut ElixirContext,
@@ -95,11 +91,7 @@ extern "C" {
         reg_id: u32,
         value: *mut u64,
     ) -> ElixirErrorCode;
-    pub fn elixir_reg_write(
-        ctx: *mut ElixirContext,
-        reg_id: u32,
-        value: u64,
-    ) -> ElixirErrorCode;
+    pub fn elixir_reg_write(ctx: *mut ElixirContext, reg_id: u32, value: u64) -> ElixirErrorCode;
 
     pub fn elixir_snapshot_save(
         ctx: *mut ElixirContext,
@@ -146,4 +138,27 @@ extern "C" {
     pub fn elixir_breakpoint_add(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
     pub fn elixir_breakpoint_del(ctx: *mut ElixirContext, addr: u64) -> ElixirErrorCode;
     pub fn elixir_breakpoint_clear(ctx: *mut ElixirContext) -> ElixirErrorCode;
+
+    // VFS
+    pub fn elixir_vfs_create_file(
+        ctx: *mut ElixirContext,
+        path: *const std::ffi::c_char,
+        data: *const u8,
+        len: u64,
+    ) -> ElixirErrorCode;
+    pub fn elixir_vfs_create_dir(
+        ctx: *mut ElixirContext,
+        path: *const std::ffi::c_char,
+    ) -> ElixirErrorCode;
+    pub fn elixir_vfs_get_stdout(
+        ctx: *mut ElixirContext,
+        out_data: *mut *mut u8,
+        out_len: *mut usize,
+    ) -> ElixirErrorCode;
+    pub fn elixir_vfs_get_stderr(
+        ctx: *mut ElixirContext,
+        out_data: *mut *mut u8,
+        out_len: *mut usize,
+    ) -> ElixirErrorCode;
+    pub fn elixir_vfs_clear_output(ctx: *mut ElixirContext) -> ElixirErrorCode;
 }

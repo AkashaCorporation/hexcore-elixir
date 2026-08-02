@@ -4,11 +4,11 @@
 // This crate provides the Rust types, traits, and FFI boundary
 // that bridge the C++23 engine to the NAPI layer.
 
+pub mod emulator;
 pub mod error;
 pub mod ffi;
-pub mod types;
-pub mod emulator;
+pub mod instrument;
 pub mod loader;
 pub mod os;
-pub mod instrument;
 pub mod snapshot;
+pub mod types;

@@ -7,8 +7,8 @@
 // Behavior references: MSDN, ReactOS (LGPL, study only), Linux man pages.
 
 pub mod linux;
-pub mod windows;
 pub mod macos;
+pub mod windows;
 
 use crate::error::ElixirResult;
 use crate::types::{Arch, OsType};

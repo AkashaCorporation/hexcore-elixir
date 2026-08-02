@@ -21,6 +21,7 @@
 #include "elixir/stalker.h"
 #include "elixir/linux_syscalls.h"
 #include "elixir/linux_stubs.h"
+#include "elixir/vfs.h"
 #include <unicorn/unicorn.h>
 #include <memory>
 #include <vector>
@@ -47,6 +48,7 @@ struct ElixirContext {
     std::unique_ptr<Stalker> stalker;
     std::unique_ptr<LinuxSyscallHandler> linux_syscalls;
     std::unique_ptr<LinuxKernelStubs> linux_stubs;
+    std::unique_ptr<VirtualFileSystem> vfs;
     uint64_t image_base = 0;  // Actual image base from PE/ELF header
     ElixirStopReason stop_reason = ELIXIR_STOP_NONE;
     uint64_t instruction_count = 0;  // Actual instructions executed

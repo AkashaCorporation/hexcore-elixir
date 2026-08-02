@@ -119,8 +119,14 @@ impl Emulator {
         let core_config = elixir_core::emulator::EmulatorConfig {
             arch,
             os,
-            stack_size: config.stack_size.map(|s| s as u64).unwrap_or(2 * 1024 * 1024),
-            heap_size: config.heap_size.map(|h| h as u64).unwrap_or(16 * 1024 * 1024),
+            stack_size: config
+                .stack_size
+                .map(|s| s as u64)
+                .unwrap_or(2 * 1024 * 1024),
+            heap_size: config
+                .heap_size
+                .map(|h| h as u64)
+                .unwrap_or(16 * 1024 * 1024),
             permissive_memory: config.permissive_memory.unwrap_or(true), // Default to true for better compatibility
         };
 
@@ -129,15 +135,18 @@ impl Emulator {
 
         // Apply permissive memory option if requested (default is true)
         if config.permissive_memory.unwrap_or(true) {
-            emulator
-                .set_permissive_memory(true)
-                .map_err(|e| Error::from_reason(format!("Failed to set permissive memory: {}", e)))?;
+            emulator.set_permissive_memory(true).map_err(|e| {
+                Error::from_reason(format!("Failed to set permissive memory: {}", e))
+            })?;
         }
 
         Ok(Self {
             inner: Some(emulator),
             disposed: false,
-            max_instructions: config.max_instructions.map(|m| m as u64).unwrap_or(1_000_000),
+            max_instructions: config
+                .max_instructions
+                .map(|m| m as u64)
+                .unwrap_or(1_000_000),
             verbose: config.verbose.unwrap_or(false),
         })
     }
@@ -190,17 +199,23 @@ impl Emulator {
         let reason = inner.stop_reason();
 
         let (kind, message) = match reason {
-            elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
+            elixir_core::types::SimpleStopReason::Exit => {
+                ("exit", "Program exited normally".to_string())
+            }
             elixir_core::types::SimpleStopReason::InsnLimit => {
                 ("insn_limit", format!("Instruction limit reached ({})", cap))
             }
             elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
-            elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+            elixir_core::types::SimpleStopReason::User => {
+                ("user", "User requested stop".to_string())
+            }
             elixir_core::types::SimpleStopReason::Breakpoint => (
                 "breakpoint",
                 "Project Pythia Oracle breakpoint hit".to_string(),
             ),
-            elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
+            elixir_core::types::SimpleStopReason::None => {
+                ("none", "No stop reason available".to_string())
+            }
         };
 
         let ip_value = inner.reg_read(41).unwrap_or(0);
@@ -245,16 +260,23 @@ impl Emulator {
         let _api_count = inner.api_log_count();
 
         let (kind, message) = match reason {
-            elixir_core::types::SimpleStopReason::Exit => ("exit", "Program exited normally".to_string()),
-            elixir_core::types::SimpleStopReason::InsnLimit => {
-                ("insn_limit", format!("Instruction limit reached ({})", self.max_instructions))
+            elixir_core::types::SimpleStopReason::Exit => {
+                ("exit", "Program exited normally".to_string())
             }
+            elixir_core::types::SimpleStopReason::InsnLimit => (
+                "insn_limit",
+                format!("Instruction limit reached ({})", self.max_instructions),
+            ),
             elixir_core::types::SimpleStopReason::Error => ("error", "Emulation error".to_string()),
-            elixir_core::types::SimpleStopReason::User => ("user", "User requested stop".to_string()),
+            elixir_core::types::SimpleStopReason::User => {
+                ("user", "User requested stop".to_string())
+            }
             elixir_core::types::SimpleStopReason::Breakpoint => {
                 ("breakpoint", "Breakpoint hit".to_string())
             }
-            elixir_core::types::SimpleStopReason::None => ("none", "No stop reason available".to_string()),
+            elixir_core::types::SimpleStopReason::None => {
+                ("none", "No stop reason available".to_string())
+            }
         };
 
         // Read actual RIP (x86_64 register ID 41 in Unicorn = UC_X86_REG_RIP)
@@ -514,6 +536,61 @@ impl Emulator {
         Ok(())
     }
 
+    // --- VFS ---
+
+    /// Create a virtual file in the VFS with the given content.
+    #[napi]
+    pub fn vfs_create_file(&self, path: String, data: Buffer) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_ref().unwrap();
+        inner
+            .vfs_create_file(&path, data.as_ref())
+            .map_err(|e| Error::from_reason(format!("VFS create file failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Create a virtual directory in the VFS.
+    #[napi]
+    pub fn vfs_create_dir(&self, path: String) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_ref().unwrap();
+        inner
+            .vfs_create_dir(&path)
+            .map_err(|e| Error::from_reason(format!("VFS create dir failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Get captured stdout output from the emulated process.
+    #[napi]
+    pub fn vfs_get_stdout(&self) -> Result<String> {
+        self.check_disposed()?;
+        let inner = self.inner.as_ref().unwrap();
+        inner
+            .vfs_get_stdout()
+            .map_err(|e| Error::from_reason(format!("VFS get stdout failed: {}", e)))
+    }
+
+    /// Get captured stderr output from the emulated process.
+    #[napi]
+    pub fn vfs_get_stderr(&self) -> Result<String> {
+        self.check_disposed()?;
+        let inner = self.inner.as_ref().unwrap();
+        inner
+            .vfs_get_stderr()
+            .map_err(|e| Error::from_reason(format!("VFS get stderr failed: {}", e)))
+    }
+
+    /// Clear captured stdout/stderr buffers.
+    #[napi]
+    pub fn vfs_clear_output(&self) -> Result<()> {
+        self.check_disposed()?;
+        let inner = self.inner.as_ref().unwrap();
+        inner
+            .vfs_clear_output()
+            .map_err(|e| Error::from_reason(format!("VFS clear output failed: {}", e)))?;
+        Ok(())
+    }
+
     /// Release emulator resources. The emulator cannot be used after this call.
     #[napi]
     pub fn dispose(&mut self) {
@@ -677,7 +754,7 @@ impl Stalker {
         Ok(vec![JsStalkerEvent {
             from: BigInt::from(0i64),
             to: BigInt::from(0i64),
-            count: count,
+            count,
         }])
     }
 
@@ -735,7 +812,9 @@ fn parse_arch(s: &str) -> Result<elixir_core::types::Arch> {
 
 fn parse_os(s: &str) -> Result<elixir_core::types::OsType> {
     match s.to_lowercase().as_str() {
-        "linux" | "ubuntu" | "debian" | "redhat" | "centos" => Ok(elixir_core::types::OsType::Linux),
+        "linux" | "ubuntu" | "debian" | "redhat" | "centos" => {
+            Ok(elixir_core::types::OsType::Linux)
+        }
         "windows" | "win32" | "win" => Ok(elixir_core::types::OsType::Windows),
         "macos" | "mac" | "darwin" | "osx" => Ok(elixir_core::types::OsType::MacOS),
         "bare" | "none" => Ok(elixir_core::types::OsType::Bare),

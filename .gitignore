@@ -14,6 +14,8 @@ node_modules/
 dist/
 *.node
 *.d.ts.map
+elixir-deps-staging/
+elixir-deps-win32-x64.zip
 
 # MSVC / MinGW compilation artifacts
 *.obj

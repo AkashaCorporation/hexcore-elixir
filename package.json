@@ -1,12 +1,13 @@
 {
     "name": "@hexcore/elixir",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "HexCore Elixir — Clean-room dynamic analysis, emulation, and instrumentation framework",
     "main": "index.js",
     "types": "index.d.ts",
     "files": [
         "index.js",
         "index.d.ts",
+        "CHANGELOG.md",
         "README.md"
     ],
     "napi": {
@@ -20,11 +21,11 @@
     },
     "scripts": {
         "artifacts": "napi artifacts",
-        "build": "napi build --platform --release --manifest-path crates/hexcore-elixir/Cargo.toml && node -e \"const fs=require('fs');const src='target/x86_64-pc-windows-msvc/release/hexcore_elixir.dll';const dst='hexcore-elixir.win32-x64-msvc.node';if(fs.existsSync(src)){fs.copyFileSync(src,dst);console.log('Copied',src,'to',dst)}\"",
-        "build:debug": "napi build --platform --manifest-path crates/hexcore-elixir/Cargo.toml",
+        "build": "napi build --platform --release --output-dir . --manifest-path crates/hexcore-elixir/Cargo.toml",
+        "build:debug": "napi build --platform --output-dir . --manifest-path crates/hexcore-elixir/Cargo.toml",
         "prepublishOnly": "napi prepublish -t npm",
         "version": "napi version",
-        "test": "echo \"Tests pending\""
+        "test": "cargo test --workspace"
     },
     "devDependencies": {
         "@napi-rs/cli": "^3.5.1",

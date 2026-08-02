@@ -824,17 +824,174 @@ void Win32HookTable::register_all_handlers() {
         return 0xFFFFFFFFFFFFFFFF;  // INVALID_HANDLE_VALUE
     });
     
-    // WriteFile - stub that returns success
-    reg(kernel32, "WriteFile", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
-        // args[0] = hFile, args[1] = lpBuffer, args[2] = nNumberOfBytesToWrite
-        // args[3] = lpNumberOfBytesWritten, args[4] = lpOverlapped
-        if (args.size() > 3 && args[3] != 0) {
-            uint32_t written = static_cast<uint32_t>(args[2]);
-            uc_mem_write(uc, args[3], &written, 4);
+    // === VFS-backed File I/O ===
+
+    // CreateFileA
+    reg(kernel32, "CreateFileA", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        // args[0]=lpFileName, args[1]=dwDesiredAccess, args[2]=dwShareMode,
+        // args[3]=lpSecurityAttributes, args[4]=dwCreationDisposition, args[5]=dwFlagsAndAttributes, args[6]=hTemplateFile
+        if (!ctx_ || !ctx_->vfs || args[0] == 0) return 0xFFFFFFFFFFFFFFFF;  // INVALID_HANDLE_VALUE
+
+        // Read filename from emulated memory
+        std::string path;
+        for (size_t i = 0; i < 4096; i++) {
+            uint8_t ch = 0;
+            if (uc_mem_read(uc, args[0] + i, &ch, 1) != UC_ERR_OK || ch == 0) break;
+            path += static_cast<char>(ch);
+        }
+        if (path.empty()) return 0xFFFFFFFFFFFFFFFF;
+
+        // Translate Win32 access flags to VFS flags
+        uint32_t vfs_flags = 0;
+        uint32_t access = args[1];  // dwDesiredAccess
+        if (access & 0x40000000) {  // GENERIC_WRITE
+            if (access & 0x80000000)  // GENERIC_READ
+                vfs_flags |= VFS_O_RDWR;
+            else
+                vfs_flags |= VFS_O_WRONLY;
+        } else {
+            vfs_flags |= VFS_O_RDONLY;
+        }
+
+        // Creation disposition
+        uint32_t disposition = static_cast<uint32_t>(args[4]);
+        switch (disposition) {
+            case 1:  // CREATE_NEW (fail if exists)
+            case 2:  // CREATE_ALWAYS (truncate if exists)
+            case 4:  // OPEN_ALWAYS (create if not exists)
+                vfs_flags |= VFS_O_CREAT;
+                break;
+            case 3:  // OPEN_EXISTING
+            default:
+                break;
+        }
+        if (disposition == 2 || disposition == 5)  // CREATE_ALWAYS or TRUNCATE_EXISTING
+            vfs_flags |= VFS_O_TRUNC;
+
+        uint64_t handle = ctx_->vfs->open(path, vfs_flags);
+        return (handle != 0) ? handle : 0xFFFFFFFFFFFFFFFF;
+    });
+
+    // CreateFileW
+    reg(kernel32, "CreateFileW", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        if (!ctx_ || !ctx_->vfs || args[0] == 0) return 0xFFFFFFFFFFFFFFFF;
+
+        // Read wide filename from emulated memory
+        std::string path;
+        for (size_t i = 0; i < 4096; i++) {
+            uint16_t ch = 0;
+            if (uc_mem_read(uc, args[0] + i * 2, &ch, 2) != UC_ERR_OK || ch == 0) break;
+            path += static_cast<char>(ch & 0xFF);
+        }
+        if (path.empty()) return 0xFFFFFFFFFFFFFFFF;
+
+        uint32_t vfs_flags = 0;
+        uint32_t access = static_cast<uint32_t>(args[1]);
+        if (access & 0x40000000) {
+            if (access & 0x80000000) vfs_flags |= VFS_O_RDWR;
+            else vfs_flags |= VFS_O_WRONLY;
+        } else {
+            vfs_flags |= VFS_O_RDONLY;
+        }
+
+        uint32_t disposition = static_cast<uint32_t>(args[4]);
+        if (disposition == 1 || disposition == 2 || disposition == 4) vfs_flags |= VFS_O_CREAT;
+        if (disposition == 2 || disposition == 5) vfs_flags |= VFS_O_TRUNC;
+
+        uint64_t handle = ctx_->vfs->open(path, vfs_flags);
+        return (handle != 0) ? handle : 0xFFFFFFFFFFFFFFFF;
+    });
+
+    // ReadFile
+    reg(kernel32, "ReadFile", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        // args[0]=hFile, args[1]=lpBuffer, args[2]=nNumberOfBytesToRead,
+        // args[3]=lpNumberOfBytesRead, args[4]=lpOverlapped
+        if (!ctx_ || !ctx_->vfs) return 0;  // FAIL
+
+        uint64_t handle = args[0];
+        uint64_t buf = args[1];
+        uint64_t count = args[2];
+        uint64_t bytes_read_out = args[3];
+
+        int64_t bytes_read = ctx_->vfs->read(handle, buf, count);
+        if (bytes_read < 0) return 0;  // FAIL
+
+        if (bytes_read_out != 0) {
+            uint32_t br = static_cast<uint32_t>(bytes_read);
+            uc_mem_write(uc, bytes_read_out, &br, 4);
         }
         return 1;  // TRUE
     });
-    
+
+    // WriteFile — VFS-backed
+    reg(kernel32, "WriteFile", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        // args[0]=hFile, args[1]=lpBuffer, args[2]=nNumberOfBytesToWrite,
+        // args[3]=lpNumberOfBytesWritten, args[4]=lpOverlapped
+        if (!ctx_ || !ctx_->vfs) return 0;  // FAIL
+
+        uint64_t handle = args[0];
+        uint64_t buf = args[1];
+        uint64_t count = args[2];
+        uint64_t bytes_written_out = args[3];
+
+        int64_t written = ctx_->vfs->write(handle, buf, count);
+        if (written < 0) return 0;  // FAIL
+
+        if (bytes_written_out != 0) {
+            uint32_t ww = static_cast<uint32_t>(written);
+            uc_mem_write(uc, bytes_written_out, &ww, 4);
+        }
+        return 1;  // TRUE
+    });
+
+    // CloseHandle — VFS-backed (discriminates file handles from other handles)
+    reg(kernel32, "CloseHandle", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        (void)uc;
+        if (!ctx_ || !ctx_->vfs) return 1;  // TRUE (no-op if no VFS)
+
+        uint64_t handle = args[0];
+
+        // Only close VFS file handles (0xA0000000+)
+        if (handle >= VFS_HANDLE_BASE) {
+            ctx_->vfs->close(handle);
+        }
+        // Non-VFS handles (module handles, heap handles, etc.) — succeed silently
+        return 1;  // TRUE
+    });
+
+    // GetFileSize
+    reg(kernel32, "GetFileSize", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        // args[0]=hFile, args[1]=lpFileSizeHigh
+        if (!ctx_ || !ctx_->vfs) return 0xFFFFFFFF;  // INVALID_FILE_SIZE
+
+        int64_t size = ctx_->vfs->get_size(args[0]);
+        if (size < 0) return 0xFFFFFFFF;
+
+        if (args[1] != 0) {
+            uint32_t high = static_cast<uint32_t>(static_cast<uint64_t>(size) >> 32);
+            uc_mem_write(uc, args[1], &high, 4);
+        }
+        return static_cast<uint64_t>(size) & 0xFFFFFFFF;
+    });
+
+    // SetFilePointer
+    reg(kernel32, "SetFilePointer", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        // args[0]=hFile, args[1]=lDistanceToMove, args[2]=lpDistanceToMoveHigh, args[3]=dwMoveMethod
+        if (!ctx_ || !ctx_->vfs) return 0xFFFFFFFF;  // INVALID_SET_FILE_POINTER
+
+        int32_t offset_lo = static_cast<int32_t>(args[1]);
+        int whence = static_cast<int>(args[3]);
+
+        int vfs_whence = VFS_SEEK_SET;
+        if (whence == 1) vfs_whence = VFS_SEEK_CUR;
+        if (whence == 2) vfs_whence = VFS_SEEK_END;
+
+        int64_t result = ctx_->vfs->seek(args[0], static_cast<int64_t>(offset_lo), vfs_whence);
+        if (result < 0) return 0xFFFFFFFF;
+
+        return static_cast<uint64_t>(result) & 0xFFFFFFFF;
+    });
+
     // LoadLibraryA / LoadLibraryW / FreeLibrary
     reg(kernel32, "LoadLibraryA", [](uc_engine*, MemoryManager*, const std::vector<uint64_t>&) -> uint64_t {
         return 0x80000000;  // Fake module handle
