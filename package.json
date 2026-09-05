@@ -1,6 +1,6 @@
 {
     "name": "@hexcore/elixir",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "HexCore Elixir — Clean-room dynamic analysis, emulation, and instrumentation framework",
     "main": "index.js",
     "types": "index.d.ts",

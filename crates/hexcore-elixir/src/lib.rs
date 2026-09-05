@@ -47,6 +47,29 @@ pub struct JsStopReason {
     pub message: String,
 }
 
+fn normalize_stop_reason(
+    reason: elixir_core::types::SimpleStopReason,
+    instructions_executed: u64,
+    max_instructions: u64,
+    instruction_pointer: u64,
+    end_address: u64,
+) -> elixir_core::types::SimpleStopReason {
+    // Compatibility guard for engine libraries predating 1.0.4: they labeled
+    // every clean uc_emu_start return as InsnLimit, even when execution had
+    // stopped at the requested end/sentinel far below the configured cap.
+    if reason == elixir_core::types::SimpleStopReason::InsnLimit
+        && max_instructions > 0
+        && instructions_executed < max_instructions
+    {
+        return if instruction_pointer == end_address {
+            elixir_core::types::SimpleStopReason::Exit
+        } else {
+            elixir_core::types::SimpleStopReason::None
+        };
+    }
+    reason
+}
+
 /// A single API call record.
 ///
 /// Shape matches the `ApiCall` type consumed by the TS wrapper in
@@ -196,7 +219,11 @@ impl Emulator {
             }
         }
 
-        let reason = inner.stop_reason();
+        let raw_reason = inner.stop_reason();
+        let ip_value = inner.reg_read(41).unwrap_or(0);
+        let instructions_executed = inner.instruction_count();
+        let reason =
+            normalize_stop_reason(raw_reason, instructions_executed, cap, ip_value, end_addr);
 
         let (kind, message) = match reason {
             elixir_core::types::SimpleStopReason::Exit => {
@@ -217,9 +244,6 @@ impl Emulator {
                 ("none", "No stop reason available".to_string())
             }
         };
-
-        let ip_value = inner.reg_read(41).unwrap_or(0);
-        let instructions_executed = inner.instruction_count();
 
         Ok(JsStopReason {
             kind: kind.to_string(),
@@ -256,8 +280,21 @@ impl Emulator {
         }
 
         // Get stop reason - this is the authoritative result
-        let reason = inner.stop_reason();
+        let raw_reason = inner.stop_reason();
         let _api_count = inner.api_log_count();
+
+        // Read the observation before classifying it so a legacy native core
+        // cannot claim a two-million instruction limit after only a few
+        // thousand instructions and a clean return to address zero.
+        let ip_value = inner.reg_read(41).unwrap_or(0);
+        let instructions_executed = inner.instruction_count();
+        let reason = normalize_stop_reason(
+            raw_reason,
+            instructions_executed,
+            self.max_instructions,
+            ip_value,
+            end_addr,
+        );
 
         let (kind, message) = match reason {
             elixir_core::types::SimpleStopReason::Exit => {
@@ -278,12 +315,6 @@ impl Emulator {
                 ("none", "No stop reason available".to_string())
             }
         };
-
-        // Read actual RIP (x86_64 register ID 41 in Unicorn = UC_X86_REG_RIP)
-        let ip_value = inner.reg_read(41).unwrap_or(0);
-
-        // Get actual instruction count from engine
-        let instructions_executed = inner.instruction_count();
 
         Ok(JsStopReason {
             kind: kind.to_string(),
@@ -625,6 +656,36 @@ impl Emulator {
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod stop_reason_tests {
+    use super::normalize_stop_reason;
+    use elixir_core::types::SimpleStopReason;
+
+    #[test]
+    fn corrects_legacy_false_instruction_limit_at_terminal_address() {
+        assert_eq!(
+            normalize_stop_reason(SimpleStopReason::InsnLimit, 4_222, 2_000_000, 0, 0),
+            SimpleStopReason::Exit
+        );
+    }
+
+    #[test]
+    fn preserves_a_real_instruction_limit() {
+        assert_eq!(
+            normalize_stop_reason(SimpleStopReason::InsnLimit, 2_000_000, 2_000_000, 0x1400, 0),
+            SimpleStopReason::InsnLimit
+        );
+    }
+
+    #[test]
+    fn does_not_invent_exit_for_an_unexplained_early_stop() {
+        assert_eq!(
+            normalize_stop_reason(SimpleStopReason::InsnLimit, 4_222, 2_000_000, 0x1400, 0),
+            SimpleStopReason::None
+        );
     }
 }
 

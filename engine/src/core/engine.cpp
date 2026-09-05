@@ -513,7 +513,12 @@ ElixirError elixir_run(ElixirContext* ctx, uint64_t start, uint64_t end, uint64_
     // Determine stop reason based on result
     if (ctx->stop_reason == ELIXIR_STOP_NONE) {
         if (err == UC_ERR_OK && max_insns > 0) {
-            ctx->stop_reason = ELIXIR_STOP_INSN_LIMIT;
+            // Unicorn also returns UC_ERR_OK when it reaches `end` or an
+            // emulated return sentinel. Do not report the requested cap as
+            // reached unless the instruction counter actually reached it.
+            ctx->stop_reason = ctx->instruction_count >= max_insns
+                ? ELIXIR_STOP_INSN_LIMIT
+                : ELIXIR_STOP_EXIT;
         } else if (err != UC_ERR_OK) {
             ctx->stop_reason = ELIXIR_STOP_ERROR;
         }

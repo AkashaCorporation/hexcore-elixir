@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4 - Stop-reason integrity (2026-08-10)
+
+- Corrected clean early termination so it is no longer reported as an instruction-limit hit.
+- Added a bridge compatibility guard for older native cores that returned `InsnLimit` below the configured cap.
+- Kept actual instruction counts and terminal addresses as the authoritative evidence.
+- Added a page-aware, 16 MiB-bounded Windows CRT `strlen` model and classified `RaiseException` as an error stop.
+
 ## 1.0.3 - VFS propagation and real release gates (2026-08-02)
 
 - Added a functional virtual filesystem with normalized Windows/POSIX paths, files, directories, handles, seek/truncate behavior, and bounded guest-memory I/O.

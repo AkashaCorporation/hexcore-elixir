@@ -1049,6 +1049,7 @@ void Win32HookTable::register_all_handlers() {
     
     // RaiseException - stop emulation
     reg(kernel32, "RaiseException", [this](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>&) -> uint64_t {
+        if (ctx_) ctx_->stop_reason = ELIXIR_STOP_ERROR;
         uc_emu_stop(uc);
         return 0;
     });
@@ -1369,6 +1370,25 @@ void Win32HookTable::register_all_handlers() {
     reg(crt_dlls, "free", [](uc_engine*, MemoryManager* mem, const std::vector<uint64_t>& args) -> uint64_t {
         if (args.size() >= 1 && args[0] != 0) {
             mem->heap_free(args[0]);
+        }
+        return 0;
+    });
+
+    reg(crt_dlls, "strlen", [](uc_engine* uc, MemoryManager*, const std::vector<uint64_t>& args) -> uint64_t {
+        if (args.empty() || args[0] == 0) return 0;
+        constexpr uint64_t kMaxStringBytes = 16ull * 1024ull * 1024ull;
+        constexpr size_t kPageSize = 0x1000;
+        std::vector<uint8_t> buffer(kPageSize);
+        uint64_t length = 0;
+        while (length < kMaxStringBytes) {
+            const uint64_t cursor = args[0] + length;
+            const size_t page_remaining = kPageSize - static_cast<size_t>(cursor & (kPageSize - 1));
+            const size_t read_size = static_cast<size_t>(std::min<uint64_t>(page_remaining, kMaxStringBytes - length));
+            if (uc_mem_read(uc, cursor, buffer.data(), read_size) != UC_ERR_OK) return 0;
+            for (size_t i = 0; i < read_size; ++i) {
+                if (buffer[i] == 0) return length + i;
+            }
+            length += read_size;
         }
         return 0;
     });
